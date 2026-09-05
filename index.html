@@ -231,6 +231,14 @@
   <div class="modal-a"><button class="danger" id="csvDownload" style="border-color:var(--brass);color:var(--brass)">Scarica .csv</button><button class="save" id="csvCopy">Copia</button></div>
 </div></div>
 
+<div class="overlay" id="ovNewCont"><div class="modal">
+  <div class="modal-h"><h2>Nuovo container</h2><button class="x" data-close="ovNewCont">✕</button></div>
+  <label class="f"><span>Tipo</span><select id="ncType"></select></label>
+  <label class="f"><span>Nome / codice (vuoto = codice automatico)</span><input id="ncName" placeholder="codice automatico"></label>
+  <div class="grid2"><label class="f"><span>Largh. (cm)</span><input id="ncW" type="number"></label><label class="f"><span>Prof. (cm)</span><input id="ncD" type="number"></label></div>
+  <label class="f"><span>Altezza (cm)</span><input id="ncH" type="number"></label>
+  <div class="modal-a"><button class="save" id="ncSave">Crea</button></div>
+</div></div>
 <div class="overlay" id="ovSet"><div class="modal">
   <div class="modal-h"><h2>Impostazioni · Drive</h2><button class="x" data-close="ovSet">✕</button></div>
   <div class="census" style="margin-bottom:12px"><div class="row"><span class="k">Modalità storage</span><span class="v" id="setMode">—</span></div></div>
@@ -266,6 +274,9 @@ const CONDITIONS=["Nuovo","Come nuovo","Buono","Usurato","Da sistemare","Da apri
 const COND_COLOR={"Nuovo":"#4a7c72","Come nuovo":"#5a8f83","Buono":"#8a8a5c","Usurato":"#b8873f","Da sistemare":"#c0553f","Da aprire":"#c69749"};
 const PASS_LABEL={1:"Passata 1 · superficie",2:"Passata 2",3:"Passata 3",4:"Passata 4 · fondo",0:"Varie"};
 const PASS_SHORT={1:"P1",2:"P2",3:"P3",4:"P4"};
+const CONTAINER_TYPES={ "Armadio":[100,55,200],"Scaffale":[90,40,180],"Cassettiera":[60,45,90],"Banco da lavoro":[150,60,90],"Cassapanca":[110,45,55],"Stipetto":[60,35,120],"Ripostiglio":[150,120,220],"Parete attrezzi":[120,8,100],"Altro":[80,50,100] };
+const CODENAMES=["Ermellino","Ghiro","Tasso","Lince","Falco","Corvo","Puma","Alce","Bisonte","Martora","Gufo","Airone","Cervo","Vipera","Ruggine","Ombroso","Tenace","Placido","Arcano","Fulmine","Tempesta","Ambra","Cobalto","Indaco","Wisteria","Rivendell","Macondo","Narnia","Camelot","Eldorado","Gormenghast","Basalto","Granito","Zolfo"];
+function takeCodename(){ var used=new Set(); DB.containers.forEach(c=>used.add(c.code)); DB.boxes.forEach(b=>used.add(b.code)); DB.rooms.forEach(r=>used.add(r.name)); var free=CODENAMES.filter(n=>!used.has(n)); return free.length?free[Math.floor(Math.random()*free.length)]:("Cont-"+(DB.containers.length+1)); }
 const OZY_ITEMS=[
  {id:"o1",pass:2,name:"Decoder digitale terrestre DIGIQuest 990REC",category:"Elettronica",qty:1,value:35,condition:"Come nuovo",tags:["tv","decoder"],keep:true,blackbox:false},
  {id:"o2",pass:1,name:"Kit inserti/giravite di precisione POWERFIX Profi",category:"Utensili manuali",qty:1,value:15,condition:"Buono",tags:["avvitatura"],keep:true,blackbox:false},
@@ -322,15 +333,16 @@ function migrate(){
   saveDB();
 }
 let DB=loadDB(); migrate();
-let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj"};
+let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.9.1 · 2026-09-04";
+const APP_VERSION="v0.9.2 · 2026-09-04";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
 const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 const contById=id=>DB.containers.find(c=>c.id===id);
+const curRoom=()=>DB.rooms.find(r=>r.id===ST.roomId)||DB.rooms[0];
 const boxById=id=>DB.boxes.find(b=>b.id===id);
 const boxLink=bId=>{ for(const c of DB.containers){ const s=(c.slots||[]).find(x=>x.boxId===bId); if(s) return {c,s}; } return null; };
 function show(id){document.getElementById(id).classList.add("show");}
@@ -356,8 +368,8 @@ function render(){
 
 function doorArc(room){ const dw=Math.min(80,room.w*0.22); const x=room.w*0.55; return '<path class="door" d="M'+x+' '+(room.d-2)+' a'+dw+' '+dw+' 0 0 1 '+dw+' '+(-dw)+'"></path>'; }
 function renderPlan(){
-  const room=DB.rooms[0]; let g='';
-  DB.containers.forEach(c=>{ const p=c.plan||{x:10,y:10,rot:0};
+  const room=curRoom(); let g='';
+  DB.containers.filter(c=>(c.roomId||DB.rooms[0].id)===ST.roomId).forEach(c=>{ const p=c.plan||{x:10,y:10,rot:0};
     const fw=p.rot?c.dimD:c.dimW, fd=p.rot?c.dimW:c.dimD;
     const fs=Math.max(10,Math.round(room.w/28));
     g+='<g class="cont-g" data-cid="'+c.id+'" transform="translate('+p.x+','+p.y+')">'
@@ -371,11 +383,11 @@ function bindPlan(){
   const svg=document.getElementById('planSvg'); if(!svg) return;
   let drag=null;
   svg.addEventListener('pointerdown',ev=>{ const g=ev.target.closest('.cont-g'); if(!g) return;
-    const c=contById(g.dataset.cid); const r=svg.getBoundingClientRect(); const room=DB.rooms[0];
+    const c=contById(g.dataset.cid); const r=svg.getBoundingClientRect(); const room=curRoom();
     drag={cid:g.dataset.cid,g:g,sx:ev.clientX,sy:ev.clientY,x0:c.plan.x,y0:c.plan.y,scale:r.width/room.w,moved:0,fw:(c.plan.rot?c.dimD:c.dimW),fd:(c.plan.rot?c.dimW:c.dimD),nx:null,ny:null};
     g.classList.add('sel'); try{svg.setPointerCapture(ev.pointerId);}catch(e){} });
   svg.addEventListener('pointermove',ev=>{ if(!drag) return; drag.moved+=Math.abs(ev.movementX||0)+Math.abs(ev.movementY||0);
-    if(!planEdit) return; const room=DB.rooms[0];
+    if(!planEdit) return; const room=curRoom();
     let nx=Math.min(Math.max(0,drag.x0+(ev.clientX-drag.sx)/drag.scale),room.w-drag.fw);
     let ny=Math.min(Math.max(0,drag.y0+(ev.clientY-drag.sy)/drag.scale),room.d-drag.fd);
     drag.nx=Math.round(nx); drag.ny=Math.round(ny); drag.g.setAttribute('transform','translate('+drag.nx+','+drag.ny+')'); });
@@ -389,16 +401,23 @@ function openPlace(cid){ const c=contById(cid); if(!c) return; editPlaceId=cid;
   document.getElementById("pX").value=c.plan.x; document.getElementById("pY").value=c.plan.y;
   document.getElementById("pW").value=c.dimW; document.getElementById("pD").value=c.dimD;
   document.getElementById("pRot").checked=!!c.plan.rot; show("ovPlace"); }
-function openRoom(){ const r=DB.rooms[0]; document.getElementById("rName").value=r.name; document.getElementById("rW").value=r.w; document.getElementById("rD").value=r.d; show("ovRoom"); }
+function openRoom(){ const r=curRoom(); document.getElementById("rName").value=r.name; document.getElementById("rW").value=r.w; document.getElementById("rD").value=r.d; show("ovRoom"); }
+function addRoom(){ const id="r"+Date.now(); DB.rooms.push({id:id,name:"Nuova stanza",w:400,d:300}); ST.roomId=id; saveDB(); render(); openRoom(); }
+function openNewCont(){ const sel=document.getElementById("ncType"); sel.innerHTML=Object.keys(CONTAINER_TYPES).map(t=>'<option>'+t+'</option>').join(""); sel.onchange=function(){ const d=CONTAINER_TYPES[sel.value]; document.getElementById("ncW").value=d[0]; document.getElementById("ncD").value=d[1]; document.getElementById("ncH").value=d[2]; }; sel.onchange(); document.getElementById("ncName").value=""; show("ovNewCont"); }
+function createContainer(){ const type=document.getElementById("ncType").value; const nm=document.getElementById("ncName").value.trim()||takeCodename(); const id="c"+Date.now(); const c={id:id,code:nm,type:type,room:curRoom().name,roomId:curRoom().id,plan:{x:20,y:10,rot:0},dimW:parseInt(document.getElementById("ncW").value,10)||80,dimD:parseInt(document.getElementById("ncD").value,10)||50,dimH:parseInt(document.getElementById("ncH").value,10)||100,noteEst:"",noteFun:"",place:"",slots:[]}; DB.containers.push(c); saveDB(); hide("ovNewCont"); go("container",{cId:id,ptab:"est"}); }
 function renderHome(){
-  const room=DB.rooms[0];
+  const room=curRoom();
   let h='<div class="eyebrow">Locale</div>';
+  h+='<div class="chips" style="margin:0 0 10px">'+DB.rooms.map(r=>'<button class="chip'+(r.id===ST.roomId?' chip-on':'')+'" data-room="'+r.id+'">'+esc(r.name)+'</button>').join('')+'<button class="chip" data-addroom="1">+ Stanza</button></div>';
   h+='<div class="plan-wrap"><div class="plan-top"><span class="rn">'+esc(room.name)+' · '+room.w+'×'+room.d+' cm</span><span><button data-roomedit="1">Stanza</button> <button data-planedit="1">'+(planEdit?"Fatto":"Disponi")+'</button></span></div>'+renderPlan()+'<div class="plan-hint">'+(planEdit?"Trascina i container · tocca un container per posizione, rotazione e misure":"Tocca un container per aprirlo · \u201cDisponi\u201d per spostarli")+'</div></div>';
-  h+='<button class="addline" data-explore="1" style="border-style:solid;border-color:var(--brass);color:var(--brass);margin:2px 0 8px;font-weight:700">◆ Esplora — vista esplosa (click &amp; esplodi)</button>';
+  h+='<button class="addline" data-explore="1" style="border-style:solid;border-color:var(--brass);color:var(--brass);margin:2px 0 8px;font-weight:700">◆ Esplora — vista esplosa</button>';
   h+='<button class="addline" data-settings="1" style="margin:0 0 12px">Impostazioni · Drive</button>';
-  h+='<div class="sect">Container</div>';
-  DB.containers.forEach(c=>{ const img=CONT_MEDIA[c.id]&&CONT_MEDIA[c.id].estetico?'<img src="'+CONT_MEDIA[c.id].estetico+'">':''; const bs=(c.slots||[]).filter(s=>s.boxable).length;
-    h+='<div class="ccard" data-open-c="'+c.id+'">'+img+'<div class="cc-b"><h3>'+esc(c.code)+'</h3><div class="cc-s">'+esc(c.type)+' · '+esc(c.room)+' · '+bs+' slot box · '+usableVol(c)+' L utili</div></div><span class="go">›</span></div>'; });
+  const conts=DB.containers.filter(c=>(c.roomId||DB.rooms[0].id)===ST.roomId);
+  h+='<div class="sect">Container in '+esc(room.name)+'</div>';
+  conts.forEach(c=>{ const img=CONT_MEDIA[c.id]&&CONT_MEDIA[c.id].estetico?'<img src="'+CONT_MEDIA[c.id].estetico+'">':''; const bs=(c.slots||[]).filter(s=>s.boxable).length;
+    h+='<div class="ccard" data-open-c="'+c.id+'">'+img+'<div class="cc-b"><h3>'+esc(c.code)+'</h3><div class="cc-s">'+esc(c.type)+' · '+bs+' slot box · '+usableVol(c)+' L utili</div></div><span class="go">›</span></div>'; });
+  if(!conts.length) h+='<div class="place">Nessun container in questa stanza.</div>';
+  h+='<button class="addline" data-newcont="1" style="border-style:solid;border-color:var(--teal);color:var(--teal-hi);margin:2px 0 12px">+ Nuovo container</button>';
   h+='<div class="sect">Box non ancora collocati</div>';
   const placed=new Set(); DB.containers.forEach(c=>(c.slots||[]).forEach(s=>{if(s.boxId)placed.add(s.boxId);}));
   const loose=DB.boxes.filter(b=>!placed.has(b.id));
@@ -567,7 +586,7 @@ function openSettings(){ const S=window.MineraStorage; const cid=(S&&S.getClient
 document.addEventListener("click",e=>{
   if(e.target.id==="hdImg"){ e.target.classList.toggle("zoom"); return; }
   if(e.target.classList.contains("stage")){ exBack(); return; }
-  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview]");
+  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview],[data-room],[data-addroom],[data-newcont]");
   if(!t){ if(e.target.classList.contains("overlay")) e.target.classList.remove("show"); return; }
   const d=t.dataset;
   if(d.nav==="home") go("home");
@@ -593,12 +612,16 @@ document.addEventListener("click",e=>{
   else if(d.exjump!==undefined) exJump(d.exjump);
   else if(d.settings!==undefined) openSettings();
   else if(d.boxview!==undefined){ ST.boxView=d.boxview; render(); }
+  else if(d.room!==undefined){ ST.roomId=d.room; planEdit=false; render(); }
+  else if(d.addroom!==undefined) addRoom();
+  else if(d.newcont!==undefined) openNewCont();
   else if(d.roomedit!==undefined) openRoom();
   else if(d.planedit!==undefined){ planEdit=!planEdit; render(); }
   else if(d.close!==undefined) hide(d.close);
 });
 document.getElementById("pSave").onclick=()=>{ const c=contById(editPlaceId); if(c){ c.plan.x=Math.max(0,parseInt(document.getElementById("pX").value,10)||0); c.plan.y=Math.max(0,parseInt(document.getElementById("pY").value,10)||0); c.dimW=parseInt(document.getElementById("pW").value,10)||c.dimW; c.dimD=parseInt(document.getElementById("pD").value,10)||c.dimD; c.plan.rot=document.getElementById("pRot").checked; } saveDB(); hide("ovPlace"); render(); };
-document.getElementById("rSave").onclick=()=>{ const r=DB.rooms[0]; r.name=document.getElementById("rName").value.trim()||r.name; r.w=parseInt(document.getElementById("rW").value,10)||r.w; r.d=parseInt(document.getElementById("rD").value,10)||r.d; saveDB(); hide("ovRoom"); render(); };
+document.getElementById("rSave").onclick=()=>{ const r=curRoom(); r.name=document.getElementById("rName").value.trim()||r.name; r.w=parseInt(document.getElementById("rW").value,10)||r.w; r.d=parseInt(document.getElementById("rD").value,10)||r.d; saveDB(); hide("ovRoom"); render(); };
+document.getElementById("ncSave").onclick=createContainer;
 document.getElementById("setSaveId").onclick=()=>{ const S=window.MineraStorage; if(S&&S.setClientId) S.setClientId(document.getElementById("setClient").value); openSettings(); };
 document.getElementById("setConnect").onclick=()=>{ const S=window.MineraStorage; if(!S){ alert("Modulo Drive non caricato."); return; } S.setClientId(document.getElementById("setClient").value); S.connect(()=>openSettings()); };
 document.getElementById("setSync").onclick=async()=>{ const S=window.MineraStorage; if(S&&S.saveCatalog){ const ok=await S.saveCatalog(DB); alert(ok?"Catalogo sincronizzato sul tuo Drive.":"Sync non riuscita: connetti prima Drive."); } else alert("Modulo Drive non disponibile."); };
