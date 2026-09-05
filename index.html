@@ -173,6 +173,17 @@
   .capbtn{display:block;text-align:center;background:var(--panel);border:1px dashed #4a4f51;color:#d8d2c6;border-radius:9px;padding:11px;font-size:14px;font-weight:600;cursor:pointer;margin-bottom:8px;}
   .capbtn:hover{border-color:var(--brass);color:#efe9dd;}
   .rmphoto{display:block;width:100%;background:none;border:none;color:var(--danger);font-size:13px;padding:4px;cursor:pointer;margin-bottom:6px;}
+  .boxseg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;margin-bottom:12px;}
+  .boxseg button{background:transparent;border:none;color:#a9a49a;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;}
+  .boxseg button.on{background:var(--brass);color:#1a1509;}
+  .ogrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:8px;}
+  .otile{position:relative;aspect-ratio:1/1;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#111;padding:0;cursor:pointer;animation:explode .4s both;}
+  .otile.dim{opacity:.45;}
+  .otile img{width:100%;height:100%;object-fit:cover;display:block;}
+  .oletter{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:22px;color:#8a7a4e;background:#e5ddca;}
+  .ocap{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(transparent,rgba(0,0,0,.85));color:#f2ede1;font-size:10.5px;line-height:1.2;padding:16px 6px 5px;text-align:left;opacity:0;transform:translateY(4px);transition:.15s;display:flex;flex-direction:column;gap:2px;pointer-events:none;}
+  .ocap em{font-style:normal;font-family:ui-monospace,Menlo,monospace;color:var(--brass-hi);}
+  .otile:hover .ocap{opacity:1;transform:none;}
   @media(max-width:520px){ .readout .num{font-size:32px;} }
 </style>
 </head>
@@ -180,7 +191,7 @@
 <div class="wrap">
   <div class="crumb" id="crumb"></div>
   <div id="app"></div>
-  <div class="foot">La Miniera · Stanza → Container → Slot → Box → Oggetto · dati salvati su questo browser</div>
+  <div class="foot">La Miniera · Stanza → Container → Slot → Box → Oggetto · dati salvati su questo browser · <span id="appver" style="color:#7a7468;font-family:ui-monospace,Menlo,monospace"></span></div>
 </div>
 
 <div class="overlay" id="ovSlot"><div class="modal">
@@ -311,9 +322,10 @@ function migrate(){
   saveDB();
 }
 let DB=loadDB(); migrate();
-let ST={view:"home",cId:null,bId:null,ptab:"est"};
+let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj"};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
+const APP_VERSION="v0.9.1 · 2026-09-04";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -517,8 +529,15 @@ function exLocale(){ return '<div class="exgrid">'+DB.containers.map((c,i)=>{ co
 function exContainer(photo){ const c=contById(ST.exC); const M=CONT_MEDIA[c.id]||{};
   if(photo&&M.funzionale){ const chips=(c.slots||[]).map(s=>{ if(s.px==null) return ''; const lb=s.boxId?boxById(s.boxId):null; const cls=lb?'exchip box':'exchip'; const label=lb?lb.code:(s.name.split('·').pop().trim()); const dr=lb?' data-drill="b:'+lb.id+'"':''; return '<span class="'+cls+'" style="left:'+(s.px*100)+'%;top:'+(s.py*100)+'%"'+dr+'>'+esc(label)+'</span>'; }).join(''); return '<div class="exphoto"><img src="'+M.funzionale+'">'+chips+'</div>'; }
   return '<div class="exgrid">'+(c.slots||[]).map((s,i)=>{ const lb=s.boxId?boxById(s.boxId):null; const vol=slotVol(s); const cls='extile'+(lb?' box':'')+(s.boxable?'':' dim'); const dr=lb?' data-drill="b:'+lb.id+'"':''; return '<div class="'+cls+'"'+dr+' style="animation-delay:'+(i*50)+'ms">'+(lb?'<span class="et-badge">box</span>':'')+'<span class="et-name">'+esc(lb?lb.code:s.name)+'</span><span class="et-sub">'+esc(s.type)+(vol?' · '+vol+' L':'')+(lb?'':(s.boxable?' · '+esc(s.occ||'libero'):' · no box'))+'</span></div>'; }).join('')+'</div>'; }
-function exBox(photo){ const b=boxById(ST.exB); const M=BOX_MEDIA[b.id]||{obj:{},hd:{}}; const passes=[1,2,3,4].filter(p=>b.items.some(i=>i.pass===p));
-  return '<div class="exgrid">'+passes.map((p,i)=>{ const its=b.items.filter(x=>x.pass===p); const val=its.reduce((a,x)=>a+(x.keep&&x.value!=null?x.value:0),0);
+function exBox(photo){ const b=boxById(ST.exB); const M=BOX_MEDIA[b.id]||{obj:{},hd:{}};
+  const seg='<div class="boxseg"><button class="'+(ST.boxView!=="strati"?"on":"")+'" data-boxview="obj">Oggetti</button><button class="'+(ST.boxView==="strati"?"on":"")+'" data-boxview="strati">Strati</button></div>';
+  if(ST.boxView!=="strati"){
+    const tiles=b.items.map((it,i)=>{ const im=it.photo||M.obj[it.id]; const val=it.blackbox?"da aprire":(it.value!=null?eur(it.value,0):"—");
+      return '<button class="otile'+(it.keep?"":" dim")+'" data-obj="'+it.id+'" style="animation-delay:'+(i*28)+'ms" title="'+esc(it.name)+" · "+val+'">'+(im?'<img src="'+im+'">':'<span class="oletter">'+esc((it.name[0]||"?").toUpperCase())+'</span>')+'<span class="ocap">'+esc(it.name)+'<em>'+val+'</em></span></button>'; }).join("");
+    return seg+'<div class="ogrid">'+tiles+'</div>';
+  }
+  const passes=[1,2,3,4].filter(p=>b.items.some(i=>i.pass===p));
+  return seg+'<div class="exgrid">'+passes.map((p,i)=>{ const its=b.items.filter(x=>x.pass===p); const val=its.reduce((a,x)=>a+(x.keep&&x.value!=null?x.value:0),0);
     if(photo&&M.hd[p]) return '<div class="layer" data-drill="l:'+p+'" style="animation-delay:'+(i*60)+'ms"><img src="'+M.hd[p]+'"><div class="ll-cap">'+PASS_SHORT[p]+' · '+its.length+' ogg · '+eur(val,0)+'</div></div>';
     return '<div class="extile" data-drill="l:'+p+'" style="animation-delay:'+(i*60)+'ms"><span class="et-name">'+PASS_SHORT[p]+'</span><span class="et-sub">'+its.length+' oggetti · '+eur(val,0)+'</span></div>'; }).join('')+'</div>'; }
 function exLayer(photo){ const b=boxById(ST.exB); const M=BOX_MEDIA[b.id]||{obj:{}}; const its=b.items.filter(i=>i.pass===ST.exPass);
@@ -532,7 +551,7 @@ function renderExplore(){ const photo=ST.exPhoto; let body;
   else if(ST.exLevel==='layer') body=exLayer(photo);
   const canToggle=ST.exLevel!=='locale';
   const bar='<div class="exbar"><button class="bk" data-exback="1">‹ Su</button><div class="ex-sp"></div>'+(canToggle?'<button class="tg" data-extoggle="1">'+(photo?'Wireframe':'Foto')+'</button>':'')+'<button class="bk" data-explist="1">Lista</button></div><div class="excrumb-row">'+exCrumb()+'</div>';
-  const hint=ST.exLevel==='locale'?'tocca un container per esploderlo':(ST.exLevel==='box'?'tocca uno strato per rovistare gli oggetti':(ST.exLevel==='layer'?'tocca un oggetto per i dettagli':'tocca un box'));
+  const hint=ST.exLevel==='locale'?'tocca un container per esploderlo':(ST.exLevel==='box'?(ST.boxView!=='strati'?'tutti gli oggetti del box · passa il mouse per la descrizione, tocca per la foto HD':'tocca uno strato per rovistare gli oggetti'):(ST.exLevel==='layer'?'tocca un oggetto per i dettagli':'tocca un box'));
   document.getElementById("app").innerHTML=bar+'<div class="stage">'+body+'<div class="exhint">'+hint+' · tocca lo sfondo per salire</div></div>';
 }
 function exCrumb(){ const seg=[]; seg.push('<button data-exjump="locale">'+esc(DB.rooms[0].name)+'</button>');
@@ -548,7 +567,7 @@ function openSettings(){ const S=window.MineraStorage; const cid=(S&&S.getClient
 document.addEventListener("click",e=>{
   if(e.target.id==="hdImg"){ e.target.classList.toggle("zoom"); return; }
   if(e.target.classList.contains("stage")){ exBack(); return; }
-  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings]");
+  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview]");
   if(!t){ if(e.target.classList.contains("overlay")) e.target.classList.remove("show"); return; }
   const d=t.dataset;
   if(d.nav==="home") go("home");
@@ -573,6 +592,7 @@ document.addEventListener("click",e=>{
   else if(d.exobj!==undefined) openObject(d.exobj);
   else if(d.exjump!==undefined) exJump(d.exjump);
   else if(d.settings!==undefined) openSettings();
+  else if(d.boxview!==undefined){ ST.boxView=d.boxview; render(); }
   else if(d.roomedit!==undefined) openRoom();
   else if(d.planedit!==undefined){ planEdit=!planEdit; render(); }
   else if(d.close!==undefined) hide(d.close);
@@ -595,6 +615,7 @@ document.getElementById("iPlus").onclick=()=>{ const el=document.getElementById(
 document.getElementById("csvCopy").onclick=async()=>{ const el=document.getElementById("csvBox"); try{await navigator.clipboard.writeText(el.value);}catch(e){ el.focus(); el.select(); } };
 document.getElementById("csvDownload").onclick=()=>{ const b=new Blob([document.getElementById("csvBox").value],{type:"text/csv;charset=utf-8;"}); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download="box.csv"; a.click(); URL.revokeObjectURL(u); };
 
+var _v=document.getElementById("appver"); if(_v) _v.textContent=APP_VERSION;
 render();
 </script>
 </body>
