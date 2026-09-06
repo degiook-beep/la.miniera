@@ -231,6 +231,29 @@
   <div class="modal-a"><button class="danger" id="csvDownload" style="border-color:var(--brass);color:var(--brass)">Scarica .csv</button><button class="save" id="csvCopy">Copia</button></div>
 </div></div>
 
+<div class="overlay" id="ovCont"><div class="modal">
+  <div class="modal-h"><h2>Modifica container</h2><button class="x" data-close="ovCont">✕</button></div>
+  <div class="grid2">
+    <div class="f"><span>Estetico (chiuso)</span><div id="ceEst"></div><label class="capbtn"><input type="file" id="ceEstIn" accept="image/*" capture="environment" hidden>Foto estetico</label></div>
+    <div class="f"><span>Funzionale (aperto)</span><div id="ceFun"></div><label class="capbtn"><input type="file" id="ceFunIn" accept="image/*" capture="environment" hidden>Foto funzionale</label></div>
+  </div>
+  <label class="f"><span>Nome / codice</span><input id="ceName"></label>
+  <label class="f"><span>Tipo</span><select id="ceType"></select></label>
+  <div class="grid2"><label class="f"><span>Largh. (cm)</span><input id="ceW" type="number"></label><label class="f"><span>Prof. (cm)</span><input id="ceD" type="number"></label></div>
+  <label class="f"><span>Altezza (cm)</span><input id="ceH" type="number"></label>
+  <div class="modal-a"><button class="danger" id="ceDelete">Elimina</button><button class="save" id="ceSave">Salva</button></div>
+</div></div>
+<div class="overlay" id="ovBox"><div class="modal">
+  <div class="modal-h"><h2>Modifica box</h2><button class="x" data-close="ovBox">✕</button></div>
+  <div id="beCover"></div>
+  <label class="capbtn"><input type="file" id="beCoverIn" accept="image/*" capture="environment" hidden>Foto copertina box</label>
+  <label class="f" style="margin-top:8px"><span>Nome / codice</span><input id="beName"></label>
+  <div class="modal-a"><button class="danger" id="beDelete">Elimina box</button><button class="save" id="beSave">Salva</button></div>
+</div></div>
+<div class="overlay" id="ovTrash"><div class="modal">
+  <div class="modal-h"><h2>Cestino foto — riusa</h2><button class="x" data-close="ovTrash">✕</button></div>
+  <div id="trashGrid" class="ogrid"></div>
+</div></div>
 <div class="overlay" id="ovNewCont"><div class="modal">
   <div class="modal-h"><h2>Nuovo container</h2><button class="x" data-close="ovNewCont">✕</button></div>
   <label class="f"><span>Tipo</span><select id="ncType"></select></label>
@@ -318,6 +341,7 @@ const KEY="miniera:db:v2";
 function loadDB(){ try{const s=JSON.parse(localStorage.getItem(KEY)); if(s&&s.containers&&s.boxes) return s;}catch(e){} return JSON.parse(JSON.stringify(DEFAULT_DB)); }
 function saveDB(){ try{localStorage.setItem(KEY,JSON.stringify(DB)); return true;}catch(e){ return false; } }
 function resizeDataURL(file,maxSide,q){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=ev=>{ const img=new Image(); img.onload=()=>{ let w=img.width,h=img.height; const s=Math.min(1,maxSide/Math.max(w,h)); w=Math.round(w*s); h=Math.round(h*s); const c=document.createElement('canvas'); c.width=w;c.height=h; c.getContext('2d').drawImage(img,0,0,w,h); res(c.toDataURL('image/jpeg',q)); }; img.onerror=rej; img.src=ev.target.result; }; r.onerror=rej; r.readAsDataURL(file); }); }
+async function captureTo(file,obj,field){ obj[field]=await resizeDataURL(file,760,0.62); if(window.MineraStorage && MineraStorage.isDriveReady && MineraStorage.isDriveReady()){ try{ const nm=(field+"__"+(obj.code||obj.name||"foto")+"__"+Date.now()+".jpg").replace(/[^A-Za-z0-9._-]+/g,"_"); const up=await MineraStorage.uploadPhoto(file,nm); if(up&&up.id) obj[field+"DriveId"]=up.id; }catch(e){} } saveDB(); }
 function migrate(){
   if(!DB.rooms||!DB.rooms.length) DB.rooms=[{id:"r1",name:(DB.room&&DB.room.name)||"Locale",w:(DB.room&&DB.room.w)||350,d:(DB.room&&DB.room.d)||300}];
   const rid=DB.rooms[0].id;
@@ -329,14 +353,14 @@ function migrate(){
     (c.slots||[]).forEach(s=>{ if(s.w==null){ const d=sd[s.id]; if(d){s.w=d[0];s.d=d[1];s.h=d[2];} else {s.w=40;s.d=40;s.h=30;} } if(s.px==null){ const q=sp[s.id]; if(q){s.px=q[0];s.py=q[1];} } });
   });
   if(!DB._seeded){ const placed=(DB.containers||[]).some(c=>(c.slots||[]).some(s=>s.boxId==="b_ozy")); if(!placed){ const c=(DB.containers||[]).find(x=>x.id==="c_pemberley"); const s=c&&(c.slots||[]).find(x=>x.id==="s3"); if(s) s.boxId="b_ozy"; } DB._seeded=true; }
-  if(!DB._boxfix){ const b=(DB.boxes||[]).find(x=>x.id==="b_ozy"); if(b){ const o1=b.items.find(i=>i.id==="o1"); if(o1) o1.pass=2; b.items=b.items.filter(i=>i.id!=="o3"); if(!b.items.some(i=>i.id==="oW")) b.items.push({id:"oW",pass:1,name:"Scatola bianca (contenuto da identificare)",category:"Scatole & varie",qty:1,value:null,condition:"Da aprire",tags:["scatola"],keep:true,blackbox:true}); if(!b.items.some(i=>i.id==="oI")) b.items.push({id:"oI",pass:1,name:"Scatola INIU (power bank/caricatore · gar. 3 anni)",category:"Elettronica",qty:1,value:20,condition:"Nuovo",tags:["iniu","power","carica"],keep:true,blackbox:false}); } DB._boxfix=true; }
+  if(!DB._boxfix){ const b=(DB.boxes||[]).find(x=>x.id==="b_ozy"); if(b){ const o1=b.items.find(i=>i.id==="o1"); if(o1) o1.pass=2; b.items=b.items.filter(i=>i.id!=="o3"); if(!b.items.some(i=>i.id==="oW")) b.items.push({id:"oW",pass:1,name:"Scatola bianca (contenuto da identificare)",category:"Scatole & varie",qty:1,value:null,condition:"Da aprire",tags:["scatola"],keep:true,blackbox:true}); if(!b.items.some(i=>i.id==="oI")) b.items.push({id:"oI",pass:1,name:"Scatola INIU (power bank/caricatore · gar. 3 anni)",category:"Elettronica",qty:1,value:20,condition:"Nuovo",tags:["iniu","power","carica"],keep:true,blackbox:false}); } DB._boxfix=true; } if(!DB.photoTrash) DB.photoTrash=[];
   saveDB();
 }
 let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.9.2 · 2026-09-04";
+const APP_VERSION="v0.9.3 · 2026-09-05";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -404,7 +428,7 @@ function openPlace(cid){ const c=contById(cid); if(!c) return; editPlaceId=cid;
 function openRoom(){ const r=curRoom(); document.getElementById("rName").value=r.name; document.getElementById("rW").value=r.w; document.getElementById("rD").value=r.d; show("ovRoom"); }
 function addRoom(){ const id="r"+Date.now(); DB.rooms.push({id:id,name:"Nuova stanza",w:400,d:300}); ST.roomId=id; saveDB(); render(); openRoom(); }
 function openNewCont(){ const sel=document.getElementById("ncType"); sel.innerHTML=Object.keys(CONTAINER_TYPES).map(t=>'<option>'+t+'</option>').join(""); sel.onchange=function(){ const d=CONTAINER_TYPES[sel.value]; document.getElementById("ncW").value=d[0]; document.getElementById("ncD").value=d[1]; document.getElementById("ncH").value=d[2]; }; sel.onchange(); document.getElementById("ncName").value=""; show("ovNewCont"); }
-function createContainer(){ const type=document.getElementById("ncType").value; const nm=document.getElementById("ncName").value.trim()||takeCodename(); const id="c"+Date.now(); const c={id:id,code:nm,type:type,room:curRoom().name,roomId:curRoom().id,plan:{x:20,y:10,rot:0},dimW:parseInt(document.getElementById("ncW").value,10)||80,dimD:parseInt(document.getElementById("ncD").value,10)||50,dimH:parseInt(document.getElementById("ncH").value,10)||100,noteEst:"",noteFun:"",place:"",slots:[]}; DB.containers.push(c); saveDB(); hide("ovNewCont"); go("container",{cId:id,ptab:"est"}); }
+function createContainer(){ const type=document.getElementById("ncType").value; const nm=document.getElementById("ncName").value.trim()||takeCodename(); const id="c"+Date.now(); const c={id:id,code:nm,type:type,room:curRoom().name,roomId:curRoom().id,plan:{x:20,y:10,rot:0},dimW:parseInt(document.getElementById("ncW").value,10)||80,dimD:parseInt(document.getElementById("ncD").value,10)||50,dimH:parseInt(document.getElementById("ncH").value,10)||100,noteEst:"",noteFun:"",place:"",slots:[]}; DB.containers.push(c); saveDB(); hide("ovNewCont"); openContEdit(id); }
 function renderHome(){
   const room=curRoom();
   let h='<div class="eyebrow">Locale</div>';
@@ -433,12 +457,13 @@ function renderContainer(c){
   const usable=usableVol(c);
   const pct=volExt?Math.round(usable/volExt*100):0;
   const M=CONT_MEDIA[c.id]||{};
-  const src=ST.ptab==="est"?M.estetico:M.funzionale;
+  const src=ST.ptab==="est"?(c.estetico||M.estetico):(c.funzionale||M.funzionale);
   const cap=ST.ptab==="est"?"aspetto estetico · anta chiusa":"aspetto funzionale · anta aperta";
   const boxSlots=(c.slots||[]).filter(s=>s.boxable);
   let h='<div class="codebar"><span class="dot cont"></span><h1 style="font-size:24px">'+esc(c.code)+'</h1></div>'
    +'<div class="readout"><span class="num" style="font-size:34px">'+usable+'</span><span class="u">L utili ai box</span><span class="pct">· '+pct+'% di '+volExt+' L</span></div>'
    +'<div class="meta"><b>'+esc(c.type)+'</b> · '+esc(c.room)+' · <b>'+boxSlots.length+'</b> slot box</div>'
+   +'<button class="addline" data-contedit="'+c.id+'" style="margin:10px 0 2px">Modifica container · foto (estetico/funzionale)</button>'
    +'<div class="tabs"><button class="tab'+(ST.ptab==="est"?" on":"")+'" data-ptab="est">Estetico</button><button class="tab'+(ST.ptab==="fun"?" on":"")+'" data-ptab="fun">Funzionale</button></div>'
    +'<div class="photo">'+(src?'<img data-cphoto="1" src="'+src+'"><span class="cap">'+cap+'</span>':'')+'</div>'
    +'<div class="sect">Censimento</div><div class="census">'
@@ -495,6 +520,7 @@ function renderBox(b){
     });
   });
   h+='<div class="actions"><button class="'+(b.done?"primary ghost":"primary")+'" data-done="1">'+(b.done?"Riapri":"Completa scatola")+'</button><button class="ghost" data-csv="1">CSV</button></div>';
+  h+='<div class="actions" style="margin-top:10px"><button class="ghost" data-boxedit="'+b.id+'" style="flex:1">Modifica box · copertina · elimina</button></div>';
   document.getElementById("app").innerHTML=h;
 }
 
@@ -519,7 +545,8 @@ function openPass(p){ const b=curBox(),M=boxMedia();
 
 function openItem(id){ const b=curBox(),M=boxMedia(); const it=b.items.find(i=>i.id===id); if(!it) return; editItemId=id;
   const cur=it.photo||M.obj[id];
-  document.getElementById("itemPhoto").innerHTML=(cur?'<div class="photo" style="margin-bottom:8px"><img src="'+cur+'" style="max-height:34vh;object-fit:contain;background:#111"></div>':'')+'<label class="capbtn"><input type="file" id="iPhotoInput" accept="image/*" capture="environment" hidden>Scatta / scegli foto reale</label>'+(it.photo?'<button class="rmphoto" id="iPhotoRemove">Rimuovi foto</button>':'');
+  document.getElementById("itemPhoto").innerHTML=(cur?'<div class="photo" style="margin-bottom:8px"><img src="'+cur+'" style="max-height:34vh;object-fit:contain;background:#111"></div>':'')+'<label class="capbtn"><input type="file" id="iPhotoInput" accept="image/*" capture="environment" hidden>Scatta / scegli foto reale</label>'+((DB.photoTrash&&DB.photoTrash.length)?'<button class="rmphoto" id="iReuse" style="color:var(--teal-hi)">Riusa foto dal cestino</button>':'')+(it.photo?'<button class="rmphoto" id="iPhotoRemove">Rimuovi foto</button>':'');
+  const reu=document.getElementById("iReuse"); if(reu) reu.onclick=()=>openTrash((url)=>{ const it3=curBox().items.find(x=>x.id===editItemId); if(it3){ it3.photo=url; saveDB(); } }, ()=>openItem(editItemId));
   const inp=document.getElementById("iPhotoInput"); if(inp) inp.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; const it2=curBox().items.find(x=>x.id===editItemId); it2.photo=await resizeDataURL(f,720,0.62);
     if(window.MineraStorage && MineraStorage.isDriveReady && MineraStorage.isDriveReady()){ try{ const nm=(curBox().code+"__P"+(it2.pass||0)+"__"+(it2.name||"oggetto")+"__"+Date.now()+".jpg").replace(/[^A-Za-z0-9._-]+/g,"_"); const up=await MineraStorage.uploadPhoto(f,nm); if(up&&up.id) it2.driveId=up.id; }catch(err){} }
     const ok=saveDB(); if(!ok) alert("Memoria del browser quasi piena: con molte foto servirà un backend."); openItem(editItemId); };
@@ -583,10 +610,26 @@ function drill(kind,id){ if(kind==='c'){ST.exLevel='container';ST.exC=id;} else 
 function exBack(){ if(ST.exLevel==='layer')ST.exLevel='box'; else if(ST.exLevel==='box')ST.exLevel='container'; else if(ST.exLevel==='container')ST.exLevel='locale'; else return go('home'); render(); }
 
 function openSettings(){ const S=window.MineraStorage; const cid=(S&&S.getClientId&&S.getClientId())||''; const el=document.getElementById('setClient'); if(el) el.value=cid; const m=!S?'Locale':(S.isDriveReady()?'Drive connesso':(cid?'Drive: da connettere':(S.canShare&&S.canShare()?'Condividi disponibile':'Locale'))); const me=document.getElementById('setMode'); if(me) me.textContent=m; show('ovSet'); }
+let editContId=null, editBoxId=null, trashApply=null, trashReopen=null;
+function openContEdit(cid){ const c=contById(cid); if(!c) return; editContId=cid; const M=CONT_MEDIA[c.id]||{}; const est=c.estetico||M.estetico, fun=c.funzionale||M.funzionale;
+  document.getElementById('ceEst').innerHTML=est?'<div class="photo" style="margin-bottom:6px"><img src="'+est+'" style="max-height:22vh;object-fit:cover"></div>':'';
+  document.getElementById('ceFun').innerHTML=fun?'<div class="photo" style="margin-bottom:6px"><img src="'+fun+'" style="max-height:22vh;object-fit:cover"></div>':'';
+  const ei=document.getElementById('ceEstIn'); ei.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; await captureTo(f,c,'estetico'); openContEdit(cid); };
+  const fi=document.getElementById('ceFunIn'); fi.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; await captureTo(f,c,'funzionale'); openContEdit(cid); };
+  document.getElementById('ceName').value=c.code;
+  const ts=document.getElementById('ceType'); let opts=Object.keys(CONTAINER_TYPES); if(!opts.includes(c.type)) opts=[c.type].concat(opts); ts.innerHTML=opts.map(t=>'<option'+(t===c.type?' selected':'')+'>'+esc(t)+'</option>').join('');
+  document.getElementById('ceW').value=c.dimW; document.getElementById('ceD').value=c.dimD; document.getElementById('ceH').value=c.dimH;
+  show('ovCont'); }
+function ceSaveFn(){ const c=contById(editContId); if(!c) return; c.code=document.getElementById('ceName').value.trim()||c.code; c.type=document.getElementById('ceType').value; c.dimW=parseInt(document.getElementById('ceW').value,10)||c.dimW; c.dimD=parseInt(document.getElementById('ceD').value,10)||c.dimD; c.dimH=parseInt(document.getElementById('ceH').value,10)||c.dimH; saveDB(); hide('ovCont'); render(); }
+function ceDeleteFn(){ const c=contById(editContId); if(!c) return; if(!confirm('Eliminare il container "'+c.code+'"? I box collegati diventano non collocati; le foto vanno nel cestino.')) return; DB.photoTrash=DB.photoTrash||[]; if(c.estetico) DB.photoTrash.push({id:'t'+Date.now(),url:c.estetico,label:c.code+' · estetico'}); if(c.funzionale) DB.photoTrash.push({id:'t'+(Date.now()+1),url:c.funzionale,label:c.code+' · funzionale'}); DB.containers=DB.containers.filter(x=>x.id!==editContId); saveDB(); hide('ovCont'); go('home'); }
+function openBoxEdit(bid){ const b=boxById(bid); if(!b) return; editBoxId=bid; document.getElementById('beName').value=b.code; document.getElementById('beCover').innerHTML=b.cover?'<div class="photo" style="margin-bottom:6px"><img src="'+b.cover+'" style="max-height:24vh;object-fit:cover"></div>':''; const ci=document.getElementById('beCoverIn'); ci.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; await captureTo(f,b,'cover'); openBoxEdit(bid); }; show('ovBox'); }
+function beSaveFn(){ const b=boxById(editBoxId); if(!b) return; b.code=document.getElementById('beName').value.trim()||b.code; saveDB(); hide('ovBox'); render(); }
+function deleteBoxFn(){ const b=boxById(editBoxId); if(!b) return; if(!confirm('Eliminare il box "'+b.code+'"? Le foto restano nel cestino per riuso.')) return; DB.photoTrash=DB.photoTrash||[]; b.items.forEach(it=>{ if(it.photo) DB.photoTrash.push({id:'t'+Date.now()+Math.floor(Math.random()*1e4),url:it.photo,label:it.name}); }); if(b.cover) DB.photoTrash.push({id:'t'+Date.now()+'c',url:b.cover,label:b.code}); DB.containers.forEach(c=>(c.slots||[]).forEach(s=>{ if(s.boxId===editBoxId) s.boxId=null; })); DB.boxes=DB.boxes.filter(x=>x.id!==editBoxId); saveDB(); hide('ovBox'); go('home'); }
+function openTrash(applyFn,reopenFn){ trashApply=applyFn||null; trashReopen=reopenFn||null; const g=document.getElementById('trashGrid'); const tr=DB.photoTrash||[]; g.innerHTML=tr.length?tr.map(p=>'<button class="otile" data-trashpick="'+p.id+'" title="'+esc(p.label||'')+'"><img src="'+p.url+'"><span class="ocap">'+esc(p.label||'')+'</span></button>').join(''):'<p class="note">Cestino vuoto. Le foto dei box eliminati finiscono qui.</p>'; show('ovTrash'); }
 document.addEventListener("click",e=>{
   if(e.target.id==="hdImg"){ e.target.classList.toggle("zoom"); return; }
   if(e.target.classList.contains("stage")){ exBack(); return; }
-  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview],[data-room],[data-addroom],[data-newcont]");
+  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview],[data-room],[data-addroom],[data-newcont],[data-contedit],[data-boxedit],[data-trashpick]");
   if(!t){ if(e.target.classList.contains("overlay")) e.target.classList.remove("show"); return; }
   const d=t.dataset;
   if(d.nav==="home") go("home");
@@ -615,6 +658,9 @@ document.addEventListener("click",e=>{
   else if(d.room!==undefined){ ST.roomId=d.room; planEdit=false; render(); }
   else if(d.addroom!==undefined) addRoom();
   else if(d.newcont!==undefined) openNewCont();
+  else if(d.contedit!==undefined) openContEdit(d.contedit);
+  else if(d.boxedit!==undefined) openBoxEdit(d.boxedit);
+  else if(d.trashpick!==undefined){ const p=(DB.photoTrash||[]).find(x=>x.id===d.trashpick); if(p&&trashApply) trashApply(p.url); hide("ovTrash"); if(trashReopen) trashReopen(); }
   else if(d.roomedit!==undefined) openRoom();
   else if(d.planedit!==undefined){ planEdit=!planEdit; render(); }
   else if(d.close!==undefined) hide(d.close);
@@ -622,6 +668,10 @@ document.addEventListener("click",e=>{
 document.getElementById("pSave").onclick=()=>{ const c=contById(editPlaceId); if(c){ c.plan.x=Math.max(0,parseInt(document.getElementById("pX").value,10)||0); c.plan.y=Math.max(0,parseInt(document.getElementById("pY").value,10)||0); c.dimW=parseInt(document.getElementById("pW").value,10)||c.dimW; c.dimD=parseInt(document.getElementById("pD").value,10)||c.dimD; c.plan.rot=document.getElementById("pRot").checked; } saveDB(); hide("ovPlace"); render(); };
 document.getElementById("rSave").onclick=()=>{ const r=curRoom(); r.name=document.getElementById("rName").value.trim()||r.name; r.w=parseInt(document.getElementById("rW").value,10)||r.w; r.d=parseInt(document.getElementById("rD").value,10)||r.d; saveDB(); hide("ovRoom"); render(); };
 document.getElementById("ncSave").onclick=createContainer;
+document.getElementById("ceSave").onclick=ceSaveFn;
+document.getElementById("ceDelete").onclick=ceDeleteFn;
+document.getElementById("beSave").onclick=beSaveFn;
+document.getElementById("beDelete").onclick=deleteBoxFn;
 document.getElementById("setSaveId").onclick=()=>{ const S=window.MineraStorage; if(S&&S.setClientId) S.setClientId(document.getElementById("setClient").value); openSettings(); };
 document.getElementById("setConnect").onclick=()=>{ const S=window.MineraStorage; if(!S){ alert("Modulo Drive non caricato."); return; } S.setClientId(document.getElementById("setClient").value); S.connect(()=>openSettings()); };
 document.getElementById("setSync").onclick=async()=>{ const S=window.MineraStorage; if(S&&S.saveCatalog){ const ok=await S.saveCatalog(DB); alert(ok?"Catalogo sincronizzato sul tuo Drive.":"Sync non riuscita: connetti prima Drive."); } else alert("Modulo Drive non disponibile."); };
