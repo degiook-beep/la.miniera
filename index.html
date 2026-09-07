@@ -234,8 +234,8 @@
 <div class="overlay" id="ovCont"><div class="modal">
   <div class="modal-h"><h2>Modifica container</h2><button class="x" data-close="ovCont">✕</button></div>
   <div class="grid2">
-    <div class="f"><span>Estetico (chiuso)</span><div id="ceEst"></div><label class="capbtn"><input type="file" id="ceEstIn" accept="image/*" capture="environment" hidden>Foto estetico</label></div>
-    <div class="f"><span>Funzionale (aperto)</span><div id="ceFun"></div><label class="capbtn"><input type="file" id="ceFunIn" accept="image/*" capture="environment" hidden>Foto funzionale</label></div>
+    <div class="f"><span>Estetico (chiuso)</span><div id="ceEst"></div><label class="capbtn"><input type="file" id="ceEstIn" accept="image/*" hidden>Acquisisci estetico (scatta/importa)</label></div>
+    <div class="f"><span>Funzionale (aperto)</span><div id="ceFun"></div><label class="capbtn"><input type="file" id="ceFunIn" accept="image/*" hidden>Acquisisci funzionale (scatta/importa)</label></div>
   </div>
   <label class="f"><span>Nome / codice</span><input id="ceName"></label>
   <label class="f"><span>Tipo</span><select id="ceType"></select></label>
@@ -246,7 +246,7 @@
 <div class="overlay" id="ovBox"><div class="modal">
   <div class="modal-h"><h2>Modifica box</h2><button class="x" data-close="ovBox">✕</button></div>
   <div id="beCover"></div>
-  <label class="capbtn"><input type="file" id="beCoverIn" accept="image/*" capture="environment" hidden>Foto copertina box</label>
+  <label class="capbtn"><input type="file" id="beCoverIn" accept="image/*" hidden>Acquisisci copertina (scatta/importa)</label>
   <label class="f" style="margin-top:8px"><span>Nome / codice</span><input id="beName"></label>
   <div class="modal-a"><button class="danger" id="beDelete">Elimina box</button><button class="save" id="beSave">Salva</button></div>
 </div></div>
@@ -360,7 +360,7 @@ let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.9.3 · 2026-09-05";
+const APP_VERSION="v0.9.5 · 2026-09-05";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -473,13 +473,15 @@ function renderContainer(c){
    +'<div class="free"><b>Estetico:</b> '+esc(c.noteEst)+'</div><div class="free"><b>Funzionale:</b> '+esc(c.noteFun)+'</div></div>'
    +'<div class="sect">Slot per i box <span class="hint">tocca per assegnare box e misure</span></div>';
   (c.slots||[]).forEach(s=>{
-    const img=M.slots&&M.slots[s.id]?'<img src="'+M.slots[s.id]+'">':'';
+    const sImg=s.extPhoto||(M.slots&&M.slots[s.id]);
+    const img=sImg?'<img src="'+sImg+'">':'';
     const linkedBox=s.boxId?boxById(s.boxId):null;
     const vol=slotVol(s);
+    const npp=(s.passPhotos||[]).length;
     let occLine, tail='';
     if(linkedBox){ occLine='→ <b>'+esc(linkedBox.code)+'</b> (catalogato)'; tail='<button class="sgo" data-open-b="'+linkedBox.id+'">Apri</button>'; }
-    else if(s.boxable){ occLine='contiene: <b>'+esc(s.occ||"libero")+'</b>'; }
-    else { occLine=esc(s.occ); tail='<span class="badge no">no box</span>'; }
+    else if(s.contains==="box"||s.boxable){ occLine='contiene: <b>'+esc(s.occ||(s.contains==="box"?"box":"libero"))+'</b>'+(npp?' · '+npp+' passate':''); }
+    else { occLine=esc(s.occ||"oggetto"); tail=s.boxable?'':'<span class="badge no">no box</span>'; }
     h+='<div class="slot'+(s.boxable?'':' nobox')+(linkedBox?' linked':'')+'">'
       +'<button class="sthumb" data-slot="'+s.id+'">'+img+'</button>'
       +'<div class="sbody" data-slot="'+s.id+'"><h3 class="sname">'+esc(s.name)+'</h3><div class="stags"><span class="stype">'+esc(s.type)+(vol?' · '+vol+' L':'')+'</span><span class="sbox">'+occLine+'</span></div></div>'
@@ -545,7 +547,7 @@ function openPass(p){ const b=curBox(),M=boxMedia();
 
 function openItem(id){ const b=curBox(),M=boxMedia(); const it=b.items.find(i=>i.id===id); if(!it) return; editItemId=id;
   const cur=it.photo||M.obj[id];
-  document.getElementById("itemPhoto").innerHTML=(cur?'<div class="photo" style="margin-bottom:8px"><img src="'+cur+'" style="max-height:34vh;object-fit:contain;background:#111"></div>':'')+'<label class="capbtn"><input type="file" id="iPhotoInput" accept="image/*" capture="environment" hidden>Scatta / scegli foto reale</label>'+((DB.photoTrash&&DB.photoTrash.length)?'<button class="rmphoto" id="iReuse" style="color:var(--teal-hi)">Riusa foto dal cestino</button>':'')+(it.photo?'<button class="rmphoto" id="iPhotoRemove">Rimuovi foto</button>':'');
+  document.getElementById("itemPhoto").innerHTML=(cur?'<div class="photo" style="margin-bottom:8px"><img src="'+cur+'" style="max-height:34vh;object-fit:contain;background:#111"></div>':'')+'<label class="capbtn"><input type="file" id="iPhotoInput" accept="image/*" hidden>Acquisisci immagine (scatta o importa)</label>'+((DB.photoTrash&&DB.photoTrash.length)?'<button class="rmphoto" id="iReuse" style="color:var(--teal-hi)">Riusa foto dal cestino</button>':'')+(it.photo?'<button class="rmphoto" id="iPhotoRemove">Rimuovi foto</button>':'');
   const reu=document.getElementById("iReuse"); if(reu) reu.onclick=()=>openTrash((url)=>{ const it3=curBox().items.find(x=>x.id===editItemId); if(it3){ it3.photo=url; saveDB(); } }, ()=>openItem(editItemId));
   const inp=document.getElementById("iPhotoInput"); if(inp) inp.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; const it2=curBox().items.find(x=>x.id===editItemId); it2.photo=await resizeDataURL(f,720,0.62);
     if(window.MineraStorage && MineraStorage.isDriveReady && MineraStorage.isDriveReady()){ try{ const nm=(curBox().code+"__P"+(it2.pass||0)+"__"+(it2.name||"oggetto")+"__"+Date.now()+".jpg").replace(/[^A-Za-z0-9._-]+/g,"_"); const up=await MineraStorage.uploadPhoto(f,nm); if(up&&up.id) it2.driveId=up.id; }catch(err){} }
@@ -561,13 +563,23 @@ function openItem(id){ const b=curBox(),M=boxMedia(); const it=b.items.find(i=>i
 /* ---- slot editor ---- */
 function openSlot(id){ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===id); if(!s) return; editSlotId=id;
   const M=CONT_MEDIA[c.id]||{};
-  document.getElementById("slotPhoto").innerHTML=(M.slots&&M.slots[id])?'<div class="photo" style="margin-bottom:12px"><img src="'+M.slots[id]+'"></div>':'';
+  if(!s.contains) s.contains = s.boxable? "box":"oggetto";
+  const extSrc = s.extPhoto || (M.slots&&M.slots[id]) || "";
+  let ph='<div class="boxseg" style="margin-bottom:10px"><button class="'+(s.contains==="box"?"on":"")+'" data-slotkind="box">Contiene: Box</button><button class="'+(s.contains!=="box"?"on":"")+'" data-slotkind="oggetto">Oggetto</button></div>';
+  ph+='<div class="f"><span>'+(s.contains==="box"?"Foto esterna (slot/box chiuso)":"Foto")+'</span>'+(extSrc?'<div class="photo" style="margin-bottom:6px"><img src="'+extSrc+'" style="max-height:24vh;object-fit:cover"></div>':'')+'<label class="capbtn"><input type="file" id="slExtIn" accept="image/*" hidden>'+(s.extPhoto?'Sostituisci immagine (scatta o importa)':'Acquisisci immagine (scatta o importa)')+'</label>'+(s.extPhoto?'<button class="rmphoto" id="slExtRm">Rimuovi foto</button>':'')+'</div>';
+  if(s.contains==="box"){ const pp=s.passPhotos||[];
+    ph+='<div class="f"><span>Passate (svuotamento a strati)</span><div class="ogrid" style="margin-bottom:8px">'+pp.map((p,i)=>'<div class="otile"><img src="'+p.url+'"><span class="ocap">P'+(i+1)+'</span><button class="mini-x" data-slprm="'+p.id+'">✕</button></div>').join('')+'</div><label class="capbtn"><input type="file" id="slPassIn" accept="image/*" hidden>+ Aggiungi passata (scatta/importa)</label></div>';
+  }
+  document.getElementById("slotPhoto").innerHTML=ph;
+  const ei=document.getElementById("slExtIn"); if(ei) ei.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; await captureTo(f,s,'extPhoto'); openSlot(id); };
+  const erm=document.getElementById("slExtRm"); if(erm) erm.onclick=()=>{ if(s.extPhoto){ DB.photoTrash=DB.photoTrash||[]; DB.photoTrash.push({id:'t'+Date.now(),url:s.extPhoto,label:s.name+' · esterna'}); } delete s.extPhoto; delete s.extPhotoDriveId; saveDB(); openSlot(id); };
+  const pi=document.getElementById("slPassIn"); if(pi) pi.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; s.passPhotos=s.passPhotos||[]; const url=await resizeDataURL(f,760,0.6); let driveId=null; if(window.MineraStorage&&MineraStorage.isDriveReady&&MineraStorage.isDriveReady()){ try{ const nm=(c.code+"__"+s.name+"__P"+(s.passPhotos.length+1)+"__"+Date.now()+".jpg").replace(/[^A-Za-z0-9._-]+/g,"_"); const up=await MineraStorage.uploadPhoto(f,nm); if(up&&up.id) driveId=up.id; }catch(err){} } s.passPhotos.push({id:'pp'+Date.now(),url:url,driveId:driveId}); saveDB(); openSlot(id); };
   document.getElementById("sName").value=s.name; document.getElementById("sType").value=s.type; document.getElementById("sOcc").value=s.occ||"";
   document.getElementById("sW").value=s.w||""; document.getElementById("sD").value=s.d||""; document.getElementById("sH").value=s.h||"";
   document.getElementById("sBoxable").checked=!!s.boxable;
   const sel=document.getElementById("sBoxId");
   sel.innerHTML='<option value="">— nessuno —</option>'+DB.boxes.map(b=>'<option value="'+b.id+'"'+(s.boxId===b.id?' selected':'')+'>'+esc(b.code)+'</option>').join("");
-  document.getElementById("assignNote").textContent=s.boxId?'Collegato: toccando "Apri" entri nel box.':'Assegna un box catalogato per collegarlo a questo slot.';
+  document.getElementById("assignNote").textContent=s.boxId?'Collegato: toccando "Apri" entri nel box.':(s.contains==="box"?'Le passate qui sono materiale grezzo: le elaboro io per creare il box catalogato collegato.':'Assegna un box catalogato per collegarlo a questo slot.');
   show("ovSlot"); }
 
 function exTitle(){ if(ST.exLevel==='container'){return esc(contById(ST.exC).code);} if(ST.exLevel==='box'){return esc(boxById(ST.exB).code);} if(ST.exLevel==='layer'){return esc(boxById(ST.exB).code)+' · '+PASS_SHORT[ST.exPass];} return esc(DB.rooms[0].name)+' · esploso'; }
@@ -629,7 +641,7 @@ function openTrash(applyFn,reopenFn){ trashApply=applyFn||null; trashReopen=reop
 document.addEventListener("click",e=>{
   if(e.target.id==="hdImg"){ e.target.classList.toggle("zoom"); return; }
   if(e.target.classList.contains("stage")){ exBack(); return; }
-  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview],[data-room],[data-addroom],[data-newcont],[data-contedit],[data-boxedit],[data-trashpick]");
+  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview],[data-room],[data-addroom],[data-newcont],[data-contedit],[data-boxedit],[data-trashpick],[data-slotkind],[data-slprm]");
   if(!t){ if(e.target.classList.contains("overlay")) e.target.classList.remove("show"); return; }
   const d=t.dataset;
   if(d.nav==="home") go("home");
@@ -661,6 +673,8 @@ document.addEventListener("click",e=>{
   else if(d.contedit!==undefined) openContEdit(d.contedit);
   else if(d.boxedit!==undefined) openBoxEdit(d.boxedit);
   else if(d.trashpick!==undefined){ const p=(DB.photoTrash||[]).find(x=>x.id===d.trashpick); if(p&&trashApply) trashApply(p.url); hide("ovTrash"); if(trashReopen) trashReopen(); }
+  else if(d.slotkind!==undefined){ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===editSlotId); if(s){ s.contains=d.slotkind; if(d.slotkind==="box") s.boxable=true; saveDB(); openSlot(editSlotId); } }
+  else if(d.slprm!==undefined){ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===editSlotId); if(s&&s.passPhotos){ const idx=s.passPhotos.findIndex(p=>p.id===d.slprm); if(idx>=0){ DB.photoTrash=DB.photoTrash||[]; DB.photoTrash.push({id:'t'+Date.now(),url:s.passPhotos[idx].url,label:s.name+' passata'}); s.passPhotos.splice(idx,1); saveDB(); openSlot(editSlotId); } } }
   else if(d.roomedit!==undefined) openRoom();
   else if(d.planedit!==undefined){ planEdit=!planEdit; render(); }
   else if(d.close!==undefined) hide(d.close);
@@ -678,7 +692,7 @@ document.getElementById("setSync").onclick=async()=>{ const S=window.MineraStora
 if(window.MineraStorage){ MineraStorage.onStatus=function(){ if(document.getElementById("ovSet").classList.contains("show")) openSettings(); }; }
 /* slot save */
 document.getElementById("sSave").onclick=()=>{ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===editSlotId); if(s){ s.name=document.getElementById("sName").value.trim()||s.name; s.type=document.getElementById("sType").value.trim(); s.occ=document.getElementById("sOcc").value.trim(); s.boxable=document.getElementById("sBoxable").checked; s.boxId=document.getElementById("sBoxId").value||null; s.w=parseInt(document.getElementById("sW").value,10)||null; s.d=parseInt(document.getElementById("sD").value,10)||null; s.h=parseInt(document.getElementById("sH").value,10)||null; } saveDB(); hide("ovSlot"); render(); };
-document.getElementById("sDelete").onclick=()=>{ const c=contById(ST.cId); c.slots=c.slots.filter(x=>x.id!==editSlotId); saveDB(); hide("ovSlot"); render(); };
+document.getElementById("sDelete").onclick=()=>{ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===editSlotId); if(s){ DB.photoTrash=DB.photoTrash||[]; if(s.extPhoto) DB.photoTrash.push({id:'t'+Date.now(),url:s.extPhoto,label:s.name}); (s.passPhotos||[]).forEach(p=>DB.photoTrash.push({id:'t'+Date.now()+Math.floor(Math.random()*1e4),url:p.url,label:s.name+' passata'})); } c.slots=c.slots.filter(x=>x.id!==editSlotId); saveDB(); hide("ovSlot"); render(); };
 /* item save */
 document.getElementById("iSave").onclick=()=>{ const b=curBox(); const it=b.items.find(i=>i.id===editItemId); if(it){ it.name=document.getElementById("iName").value.trim()||it.name; it.category=document.getElementById("iCat").value; it.qty=Math.max(1,parseInt(document.getElementById("iQty").value,10)||1); it.condition=document.getElementById("iCond").value; const v=document.getElementById("iVal").value; it.value=(v===""||v==null)?null:Math.max(0,parseFloat(String(v).replace(",","."))||0); it.keep=document.getElementById("iKeep").checked; it.blackbox=document.getElementById("iBB").checked; } saveDB(); hide("ovItem"); render(); };
 document.getElementById("iDelete").onclick=()=>{ const b=curBox(); b.items=b.items.filter(i=>i.id!==editItemId); saveDB(); hide("ovItem"); render(); };
