@@ -360,7 +360,7 @@ let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.9.5 · 2026-09-05";
+const APP_VERSION="v0.9.6 · 2026-09-05";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -480,7 +480,7 @@ function renderContainer(c){
     const npp=(s.passPhotos||[]).length;
     let occLine, tail='';
     if(linkedBox){ occLine='→ <b>'+esc(linkedBox.code)+'</b> (catalogato)'; tail='<button class="sgo" data-open-b="'+linkedBox.id+'">Apri</button>'; }
-    else if(s.contains==="box"||s.boxable){ occLine='contiene: <b>'+esc(s.occ||(s.contains==="box"?"box":"libero"))+'</b>'+(npp?' · '+npp+' passate':''); }
+    else if(s.contains==="box"||s.boxable){ occLine='contiene: <b>'+esc(s.occ||(s.contains==="box"?"box":"libero"))+'</b>'+(npp?' · '+npp+' passate':'')+((s.detailPhotos||[]).length?' · '+(s.detailPhotos||[]).length+' dettagli':''); }
     else { occLine=esc(s.occ||"oggetto"); tail=s.boxable?'':'<span class="badge no">no box</span>'; }
     h+='<div class="slot'+(s.boxable?'':' nobox')+(linkedBox?' linked':'')+'">'
       +'<button class="sthumb" data-slot="'+s.id+'">'+img+'</button>'
@@ -569,11 +569,13 @@ function openSlot(id){ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===
   ph+='<div class="f"><span>'+(s.contains==="box"?"Foto esterna (slot/box chiuso)":"Foto")+'</span>'+(extSrc?'<div class="photo" style="margin-bottom:6px"><img src="'+extSrc+'" style="max-height:24vh;object-fit:cover"></div>':'')+'<label class="capbtn"><input type="file" id="slExtIn" accept="image/*" hidden>'+(s.extPhoto?'Sostituisci immagine (scatta o importa)':'Acquisisci immagine (scatta o importa)')+'</label>'+(s.extPhoto?'<button class="rmphoto" id="slExtRm">Rimuovi foto</button>':'')+'</div>';
   if(s.contains==="box"){ const pp=s.passPhotos||[];
     ph+='<div class="f"><span>Passate (svuotamento a strati)</span><div class="ogrid" style="margin-bottom:8px">'+pp.map((p,i)=>'<div class="otile"><img src="'+p.url+'"><span class="ocap">P'+(i+1)+'</span><button class="mini-x" data-slprm="'+p.id+'">✕</button></div>').join('')+'</div><label class="capbtn"><input type="file" id="slPassIn" accept="image/*" hidden>+ Aggiungi passata (scatta/importa)</label></div>';
+    ph+='<div class="f"><span>Dettagli / singoli pezzi <em style="font-weight:400;color:#7a746a">facoltativo · migliorano il riconoscimento</em></span><div class="ogrid" style="margin-bottom:8px">'+(s.detailPhotos||[]).map(p=>'<div class="otile"><img src="'+p.url+'">'+(p.name?'<span class="ocap">'+esc(p.name)+'</span>':'')+'<button class="mini-x" data-sldrm="'+p.id+'">✕</button></div>').join('')+'</div><label class="capbtn"><input type="file" id="slDetIn" accept="image/*" hidden>+ Aggiungi dettaglio (scatta/importa)</label></div>';
   }
   document.getElementById("slotPhoto").innerHTML=ph;
   const ei=document.getElementById("slExtIn"); if(ei) ei.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; await captureTo(f,s,'extPhoto'); openSlot(id); };
   const erm=document.getElementById("slExtRm"); if(erm) erm.onclick=()=>{ if(s.extPhoto){ DB.photoTrash=DB.photoTrash||[]; DB.photoTrash.push({id:'t'+Date.now(),url:s.extPhoto,label:s.name+' · esterna'}); } delete s.extPhoto; delete s.extPhotoDriveId; saveDB(); openSlot(id); };
   const pi=document.getElementById("slPassIn"); if(pi) pi.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; s.passPhotos=s.passPhotos||[]; const url=await resizeDataURL(f,760,0.6); let driveId=null; if(window.MineraStorage&&MineraStorage.isDriveReady&&MineraStorage.isDriveReady()){ try{ const nm=(c.code+"__"+s.name+"__P"+(s.passPhotos.length+1)+"__"+Date.now()+".jpg").replace(/[^A-Za-z0-9._-]+/g,"_"); const up=await MineraStorage.uploadPhoto(f,nm); if(up&&up.id) driveId=up.id; }catch(err){} } s.passPhotos.push({id:'pp'+Date.now(),url:url,driveId:driveId}); saveDB(); openSlot(id); };
+  const di=document.getElementById("slDetIn"); if(di) di.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; s.detailPhotos=s.detailPhotos||[]; const url=await resizeDataURL(f,760,0.62); let nm=null; try{ nm=prompt("Nome del pezzo (facoltativo — lascialo vuoto e ci penso io):",""); }catch(e2){} if(nm) nm=nm.trim(); let driveId=null; if(window.MineraStorage&&MineraStorage.isDriveReady&&MineraStorage.isDriveReady()){ try{ const fn=(c.code+"__"+s.name+"__dett_"+(nm||("d"+(s.detailPhotos.length+1)))+"__"+Date.now()+".jpg").replace(/[^A-Za-z0-9._-]+/g,"_"); const up=await MineraStorage.uploadPhoto(f,fn); if(up&&up.id) driveId=up.id; }catch(err){} } s.detailPhotos.push({id:'d'+Date.now(),url:url,driveId:driveId,name:nm||""}); saveDB(); openSlot(id); };
   document.getElementById("sName").value=s.name; document.getElementById("sType").value=s.type; document.getElementById("sOcc").value=s.occ||"";
   document.getElementById("sW").value=s.w||""; document.getElementById("sD").value=s.d||""; document.getElementById("sH").value=s.h||"";
   document.getElementById("sBoxable").checked=!!s.boxable;
@@ -641,7 +643,7 @@ function openTrash(applyFn,reopenFn){ trashApply=applyFn||null; trashReopen=reop
 document.addEventListener("click",e=>{
   if(e.target.id==="hdImg"){ e.target.classList.toggle("zoom"); return; }
   if(e.target.classList.contains("stage")){ exBack(); return; }
-  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview],[data-room],[data-addroom],[data-newcont],[data-contedit],[data-boxedit],[data-trashpick],[data-slotkind],[data-slprm]");
+  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview],[data-room],[data-addroom],[data-newcont],[data-contedit],[data-boxedit],[data-trashpick],[data-slotkind],[data-slprm],[data-sldrm]");
   if(!t){ if(e.target.classList.contains("overlay")) e.target.classList.remove("show"); return; }
   const d=t.dataset;
   if(d.nav==="home") go("home");
@@ -675,6 +677,7 @@ document.addEventListener("click",e=>{
   else if(d.trashpick!==undefined){ const p=(DB.photoTrash||[]).find(x=>x.id===d.trashpick); if(p&&trashApply) trashApply(p.url); hide("ovTrash"); if(trashReopen) trashReopen(); }
   else if(d.slotkind!==undefined){ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===editSlotId); if(s){ s.contains=d.slotkind; if(d.slotkind==="box") s.boxable=true; saveDB(); openSlot(editSlotId); } }
   else if(d.slprm!==undefined){ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===editSlotId); if(s&&s.passPhotos){ const idx=s.passPhotos.findIndex(p=>p.id===d.slprm); if(idx>=0){ DB.photoTrash=DB.photoTrash||[]; DB.photoTrash.push({id:'t'+Date.now(),url:s.passPhotos[idx].url,label:s.name+' passata'}); s.passPhotos.splice(idx,1); saveDB(); openSlot(editSlotId); } } }
+  else if(d.sldrm!==undefined){ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===editSlotId); if(s&&s.detailPhotos){ const idx=s.detailPhotos.findIndex(p=>p.id===d.sldrm); if(idx>=0){ DB.photoTrash=DB.photoTrash||[]; DB.photoTrash.push({id:'t'+Date.now(),url:s.detailPhotos[idx].url,label:(s.detailPhotos[idx].name||s.name+' dettaglio')}); s.detailPhotos.splice(idx,1); saveDB(); openSlot(editSlotId); } } }
   else if(d.roomedit!==undefined) openRoom();
   else if(d.planedit!==undefined){ planEdit=!planEdit; render(); }
   else if(d.close!==undefined) hide(d.close);
@@ -692,7 +695,7 @@ document.getElementById("setSync").onclick=async()=>{ const S=window.MineraStora
 if(window.MineraStorage){ MineraStorage.onStatus=function(){ if(document.getElementById("ovSet").classList.contains("show")) openSettings(); }; }
 /* slot save */
 document.getElementById("sSave").onclick=()=>{ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===editSlotId); if(s){ s.name=document.getElementById("sName").value.trim()||s.name; s.type=document.getElementById("sType").value.trim(); s.occ=document.getElementById("sOcc").value.trim(); s.boxable=document.getElementById("sBoxable").checked; s.boxId=document.getElementById("sBoxId").value||null; s.w=parseInt(document.getElementById("sW").value,10)||null; s.d=parseInt(document.getElementById("sD").value,10)||null; s.h=parseInt(document.getElementById("sH").value,10)||null; } saveDB(); hide("ovSlot"); render(); };
-document.getElementById("sDelete").onclick=()=>{ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===editSlotId); if(s){ DB.photoTrash=DB.photoTrash||[]; if(s.extPhoto) DB.photoTrash.push({id:'t'+Date.now(),url:s.extPhoto,label:s.name}); (s.passPhotos||[]).forEach(p=>DB.photoTrash.push({id:'t'+Date.now()+Math.floor(Math.random()*1e4),url:p.url,label:s.name+' passata'})); } c.slots=c.slots.filter(x=>x.id!==editSlotId); saveDB(); hide("ovSlot"); render(); };
+document.getElementById("sDelete").onclick=()=>{ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===editSlotId); if(s){ DB.photoTrash=DB.photoTrash||[]; if(s.extPhoto) DB.photoTrash.push({id:'t'+Date.now(),url:s.extPhoto,label:s.name}); (s.passPhotos||[]).forEach(p=>DB.photoTrash.push({id:'t'+Date.now()+Math.floor(Math.random()*1e4),url:p.url,label:s.name+' passata'})); (s.detailPhotos||[]).forEach(p=>DB.photoTrash.push({id:'t'+Date.now()+Math.floor(Math.random()*1e4),url:p.url,label:(p.name||s.name+' dettaglio')})); } c.slots=c.slots.filter(x=>x.id!==editSlotId); saveDB(); hide("ovSlot"); render(); };
 /* item save */
 document.getElementById("iSave").onclick=()=>{ const b=curBox(); const it=b.items.find(i=>i.id===editItemId); if(it){ it.name=document.getElementById("iName").value.trim()||it.name; it.category=document.getElementById("iCat").value; it.qty=Math.max(1,parseInt(document.getElementById("iQty").value,10)||1); it.condition=document.getElementById("iCond").value; const v=document.getElementById("iVal").value; it.value=(v===""||v==null)?null:Math.max(0,parseFloat(String(v).replace(",","."))||0); it.keep=document.getElementById("iKeep").checked; it.blackbox=document.getElementById("iBB").checked; } saveDB(); hide("ovItem"); render(); };
 document.getElementById("iDelete").onclick=()=>{ const b=curBox(); b.items=b.items.filter(i=>i.id!==editItemId); saveDB(); hide("ovItem"); render(); };
