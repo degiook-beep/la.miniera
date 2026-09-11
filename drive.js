@@ -1,6 +1,8 @@
 /* =========================================================================
    La Miniera — modulo storage / Google Drive (lato browser, senza server)
-   - OAuth "a gettone" con Google Identity Services, scope minimo drive.file
+   - OAuth "a gettone" con Google Identity Services
+   - Scope: drive.file (scrittura sui propri file) + drive.readonly (lettura anche
+     di cataloghi scritti da altri strumenti, es. Claude) -> backend condiviso
    - Upload full-res contestuale nella cartella "La Miniera - Inbox"
    - Catalogo (JSON) sincronizzato sul Drive dell'utente
    - Degradazione: Drive -> (Condividi) -> Locale
@@ -8,7 +10,7 @@
          il cui "authorized JavaScript origin" corrisponda all'URL del sito.
    ========================================================================= */
 (function () {
-  var SCOPE = 'https://www.googleapis.com/auth/drive.file';
+  var SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly';
   var CLIENT_ID = localStorage.getItem('miniera:gclient') || '';
   var tokenClient = null, accessToken = null, tokenExp = 0, inboxId = null, catalogId = null, afterAuth = null;
   var S = (window.MineraStorage = {});
@@ -89,31 +91,68 @@
   };
 
   // catalogo JSON: salva/aggiorna
+  // Nota: con scope drive.readonly l'app PUO' LEGGERE anche file creati da altri
+  // strumenti (es. catalogo scritto da Claude), ma NON puo' sovrascriverli.
+  // Se il PATCH fallisce (403/404), si crea un nuovo file: essendo il piu' recente,
+  // sara' quello letto da loadCatalog (che ordina per modifiedTime desc).
   S.saveCatalog = function (obj) {
     if (!S.isDriveReady()) return Promise.resolve(false);
+    try {
+      obj._meta = Object.assign({}, obj._meta, {
+        origin: 'app', app: 'La Miniera', writtenAt: new Date().toISOString()
+      });
+    } catch (e) {}
     var content = new Blob([JSON.stringify(obj)], { type: 'application/json' });
+    function createNew() {
+      var meta = { name: 'la-miniera-catalog.json', parents: inboxId ? [inboxId] : undefined };
+      var form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
+      form.append('file', content);
+      return api('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', { method: 'POST', body: form })
+        .then(function (r) { return r.json(); }).then(function (j2) { catalogId = j2.id; return true; });
+    }
+    function patch(id) {
+      return api('https://www.googleapis.com/upload/drive/v3/files/' + id + '?uploadType=media', { method: 'PATCH', body: content })
+        .then(function (r) { if (!r.ok) { catalogId = null; return createNew(); } return true; })
+        .catch(function () { catalogId = null; return createNew(); });
+    }
     return ensureInbox().then(function () {
-      if (catalogId) {
-        return api('https://www.googleapis.com/upload/drive/v3/files/' + catalogId + '?uploadType=media', { method: 'PATCH', body: content }).then(function () { return true; });
-      }
+      if (catalogId) return patch(catalogId);
       var q = "name='la-miniera-catalog.json' and trashed=false";
-      return api('https://www.googleapis.com/drive/v3/files?fields=files(id)&q=' + encodeURIComponent(q))
+      return api('https://www.googleapis.com/drive/v3/files?fields=files(id,modifiedTime)&orderBy=modifiedTime desc&q=' + encodeURIComponent(q))
         .then(function (r) { return r.json(); })
         .then(function (j) {
-          if (j.files && j.files.length) { catalogId = j.files[0].id; return api('https://www.googleapis.com/upload/drive/v3/files/' + catalogId + '?uploadType=media', { method: 'PATCH', body: content }).then(function () { return true; }); }
-          var meta = { name: 'la-miniera-catalog.json', parents: inboxId ? [inboxId] : undefined };
-          var form = new FormData();
-          form.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
-          form.append('file', content);
-          return api('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', { method: 'POST', body: form })
-            .then(function (r) { return r.json(); }).then(function (j2) { catalogId = j2.id; return true; });
+          if (j.files && j.files.length) { catalogId = j.files[0].id; return patch(catalogId); }
+          return createNew();
         });
     }).catch(function () { return false; });
   };
+  // Ispeziona il catalogo remoto SENZA modificare nulla in locale.
+  // Ritorna {id, modifiedTime, origin, writtenAt, boxes, items} oppure null.
+  S.peekCatalog = function () {
+    if (!S.isDriveReady()) return Promise.resolve(null);
+    var q = "name='la-miniera-catalog.json' and trashed=false";
+    return api('https://www.googleapis.com/drive/v3/files?fields=files(id,modifiedTime)&orderBy=modifiedTime desc&q=' + encodeURIComponent(q))
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!(j.files && j.files.length)) return null;
+        var f = j.files[0];
+        return api('https://www.googleapis.com/drive/v3/files/' + f.id + '?alt=media')
+          .then(function (r) { return r.json(); })
+          .then(function (obj) {
+            var m = obj._meta || {};
+            var boxes = (obj.boxes || []).length;
+            var items = (obj.boxes || []).reduce(function (a, b) { return a + ((b.items || []).length); }, 0);
+            return { id: f.id, modifiedTime: f.modifiedTime, origin: m.origin || 'sconosciuta', writtenAt: m.writtenAt || null, boxes: boxes, items: items };
+          });
+      })
+      .catch(function () { return null; });
+  };
+
   S.loadCatalog = function () {
     if (!S.isDriveReady()) return Promise.resolve(null);
     var q = "name='la-miniera-catalog.json' and trashed=false";
-    return api('https://www.googleapis.com/drive/v3/files?fields=files(id)&q=' + encodeURIComponent(q))
+    return api('https://www.googleapis.com/drive/v3/files?fields=files(id,modifiedTime)&orderBy=modifiedTime desc&q=' + encodeURIComponent(q))
       .then(function (r) { return r.json(); })
       .then(function (j) { if (!(j.files && j.files.length)) return null; catalogId = j.files[0].id; return api('https://www.googleapis.com/drive/v3/files/' + catalogId + '?alt=media').then(function (r) { return r.json(); }); })
       .catch(function () { return null; });

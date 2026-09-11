@@ -269,7 +269,10 @@
   <div class="modal-a" style="margin-top:2px"><button class="ghost" id="setSaveId" style="flex:1;border:1px solid var(--brass);color:var(--brass);border-radius:11px;padding:12px;font-weight:700">Salva ID</button><button class="save" id="setConnect" style="flex:1">Connetti Drive</button></div>
   <button class="addline" id="setSync" style="margin-top:12px;border-style:solid;border-color:var(--teal);color:var(--teal-hi)">Sincronizza catalogo su Drive</button>
   <button class="addline" id="setLoad" style="margin-top:8px;border-style:solid;border-color:var(--brass);color:var(--brass)">Carica catalogo da Drive</button>
+  <button class="addline" id="setImportLocal" style="margin-top:8px;border-style:solid;border-color:var(--teal);color:var(--teal-hi)">Importa da file locale</button>
+  <input type="file" id="setImportFile" accept="application/json" style="display:none">
   <p class="note" style="margin-top:12px">Con Client ID + Drive connesso: le foto full-res vanno sul tuo Drive (cartella "La Miniera - Inbox") con nome contestuale, e in locale resta il thumbnail. Senza, l'app resta locale. Richiede il sito in https (Vercel).</p>
+  <p class="note" style="margin-top:6px">"Importa da file locale" carica un file .json di catalogo scelto dal tuo dispositivo, bypassando Drive (utile se lo scope OAuth dell'app non vede file caricati da altre app/strumenti).</p>
 </div></div>
 <div class="overlay" id="ovPlace"><div class="modal">
   <div class="modal-h"><h2 id="placeTitle">Posizione nel locale</h2><button class="x" data-close="ovPlace">✕</button></div>
@@ -361,7 +364,7 @@ let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.9.7 · 2026-09-10";
+const APP_VERSION="v0.10.0 · 2026-09-11";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -692,8 +695,31 @@ document.getElementById("beSave").onclick=beSaveFn;
 document.getElementById("beDelete").onclick=deleteBoxFn;
 document.getElementById("setSaveId").onclick=()=>{ const S=window.MineraStorage; if(S&&S.setClientId) S.setClientId(document.getElementById("setClient").value); openSettings(); };
 document.getElementById("setConnect").onclick=()=>{ const S=window.MineraStorage; if(!S){ alert("Modulo Drive non caricato."); return; } S.setClientId(document.getElementById("setClient").value); S.connect(()=>openSettings()); };
-document.getElementById("setSync").onclick=async()=>{ const S=window.MineraStorage; if(S&&S.saveCatalog){ const ok=await S.saveCatalog(DB); alert(ok?"Catalogo sincronizzato sul tuo Drive.":"Sync non riuscita: connetti prima Drive."); } else alert("Modulo Drive non disponibile."); };
-document.getElementById("setLoad").onclick=async()=>{ const S=window.MineraStorage; if(!S||!S.loadCatalog){ alert("Modulo Drive non disponibile."); return; } if(!confirm("Questo sostituisce i dati locali con quelli salvati sul tuo Drive. Procedere?")) return; const remote=await S.loadCatalog(); if(!remote){ alert("Nessun catalogo trovato su Drive, o Drive non connesso."); return; } DB=remote; migrate(); hide("ovSet"); go("home"); alert("Catalogo caricato da Drive."); };
+document.getElementById("setSync").onclick=async()=>{
+  const S=window.MineraStorage;
+  if(!S||!S.saveCatalog){ alert("Modulo Drive non disponibile."); return; }
+  const locBoxes=(DB.boxes||[]).length, locItems=(DB.boxes||[]).reduce((a,b)=>a+((b.items||[]).length),0);
+  let remote=null; try{ remote=await S.peekCatalog(); }catch(e){}
+  if(remote && remote.origin!=="app"){
+    const when=remote.writtenAt?new Date(remote.writtenAt).toLocaleString("it-IT"):new Date(remote.modifiedTime).toLocaleString("it-IT");
+    const proceed=confirm(
+      "⚠ ATTENZIONE — Il catalogo su Drive NON è stato scritto da questa app.\n\n"+
+      "Origine: "+remote.origin+"\nScritto il: "+when+"\n\n"+
+      "SU DRIVE:  "+remote.boxes+" box · "+remote.items+" oggetti\n"+
+      "IN LOCALE: "+locBoxes+" box · "+locItems+" oggetti\n\n"+
+      "Se sincronizzi ora, il lavoro di catalogazione presente su Drive verrà perso.\n\n"+
+      "→ OK = Carica da Drive (consigliato)\n"+
+      "→ Annulla = prosegui verso la sovrascrittura"
+    );
+    if(proceed){ const r=await S.loadCatalog(); if(r){ DB=r; migrate(); hide("ovSet"); go("home"); alert("Catalogo caricato da Drive."); } else alert("Caricamento non riuscito."); return; }
+    if(!confirm("Confermi di voler SOVRASCRIVERE il catalogo su Drive con i dati locali?\n\nIl lavoro di catalogazione esterno andrà perso.")) return;
+  }
+  const ok=await S.saveCatalog(DB);
+  alert(ok?"Catalogo sincronizzato sul tuo Drive.":"Sync non riuscita: connetti prima Drive.");
+};
+document.getElementById("setLoad").onclick=async()=>{ const S=window.MineraStorage; if(!S||!S.loadCatalog){ alert("Modulo Drive non disponibile."); return; } let info=null; try{ info=await S.peekCatalog(); }catch(e){} if(!info){ alert("Nessun catalogo trovato su Drive, o Drive non connesso."); return; } const when=info.writtenAt?new Date(info.writtenAt).toLocaleString("it-IT"):new Date(info.modifiedTime).toLocaleString("it-IT"); if(!confirm("Catalogo trovato su Drive\n\nOrigine: "+info.origin+"\nScritto il: "+when+"\nContenuto: "+info.boxes+" box · "+info.items+" oggetti\n\nQuesto sostituisce i dati locali. Procedere?")) return; const remote=await S.loadCatalog(); if(!remote){ alert("Caricamento non riuscito."); return; } DB=remote; migrate(); hide("ovSet"); go("home"); alert("Catalogo caricato da Drive."); };
+document.getElementById("setImportLocal").onclick=()=>{ document.getElementById("setImportFile").click(); };
+document.getElementById("setImportFile").onchange=(ev)=>{ const file=ev.target.files&&ev.target.files[0]; if(!file) return; if(!confirm("Questo sostituisce i dati locali con quelli del file selezionato. Procedere?")){ ev.target.value=""; return; } const r=new FileReader(); r.onload=()=>{ try{ const parsed=JSON.parse(r.result); if(!parsed||!parsed.containers||!parsed.boxes){ alert("File non valido: manca containers o boxes."); return; } DB=parsed; migrate(); hide("ovSet"); go("home"); alert("Catalogo importato da file locale."); }catch(e){ alert("Errore nel leggere il file: "+e.message); } finally { ev.target.value=""; } }; r.onerror=()=>{ alert("Errore nella lettura del file."); ev.target.value=""; }; r.readAsText(file); };
 if(window.MineraStorage){ MineraStorage.onStatus=function(){ if(document.getElementById("ovSet").classList.contains("show")) openSettings(); }; }
 /* slot save */
 document.getElementById("sSave").onclick=()=>{ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===editSlotId); if(s){ s.name=document.getElementById("sName").value.trim()||s.name; s.type=document.getElementById("sType").value.trim(); s.occ=document.getElementById("sOcc").value.trim(); s.boxable=document.getElementById("sBoxable").checked; s.boxId=document.getElementById("sBoxId").value||null; s.w=parseInt(document.getElementById("sW").value,10)||null; s.d=parseInt(document.getElementById("sD").value,10)||null; s.h=parseInt(document.getElementById("sH").value,10)||null; } saveDB(); hide("ovSlot"); render(); };
