@@ -268,6 +268,7 @@
   <label class="f"><span>Google Client ID (upload su Drive)</span><input id="setClient" placeholder="xxxx.apps.googleusercontent.com"></label>
   <div class="modal-a" style="margin-top:2px"><button class="ghost" id="setSaveId" style="flex:1;border:1px solid var(--brass);color:var(--brass);border-radius:11px;padding:12px;font-weight:700">Salva ID</button><button class="save" id="setConnect" style="flex:1">Connetti Drive</button></div>
   <button class="addline" id="setSync" style="margin-top:12px;border-style:solid;border-color:var(--teal);color:var(--teal-hi)">Sincronizza catalogo su Drive</button>
+  <button class="addline" id="setLoad" style="margin-top:8px;border-style:solid;border-color:var(--brass);color:var(--brass)">Carica catalogo da Drive</button>
   <p class="note" style="margin-top:12px">Con Client ID + Drive connesso: le foto full-res vanno sul tuo Drive (cartella "La Miniera - Inbox") con nome contestuale, e in locale resta il thumbnail. Senza, l'app resta locale. Richiede il sito in https (Vercel).</p>
 </div></div>
 <div class="overlay" id="ovPlace"><div class="modal">
@@ -360,7 +361,7 @@ let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.9.6 · 2026-09-05";
+const APP_VERSION="v0.9.7 · 2026-09-10";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -692,6 +693,7 @@ document.getElementById("beDelete").onclick=deleteBoxFn;
 document.getElementById("setSaveId").onclick=()=>{ const S=window.MineraStorage; if(S&&S.setClientId) S.setClientId(document.getElementById("setClient").value); openSettings(); };
 document.getElementById("setConnect").onclick=()=>{ const S=window.MineraStorage; if(!S){ alert("Modulo Drive non caricato."); return; } S.setClientId(document.getElementById("setClient").value); S.connect(()=>openSettings()); };
 document.getElementById("setSync").onclick=async()=>{ const S=window.MineraStorage; if(S&&S.saveCatalog){ const ok=await S.saveCatalog(DB); alert(ok?"Catalogo sincronizzato sul tuo Drive.":"Sync non riuscita: connetti prima Drive."); } else alert("Modulo Drive non disponibile."); };
+document.getElementById("setLoad").onclick=async()=>{ const S=window.MineraStorage; if(!S||!S.loadCatalog){ alert("Modulo Drive non disponibile."); return; } if(!confirm("Questo sostituisce i dati locali con quelli salvati sul tuo Drive. Procedere?")) return; const remote=await S.loadCatalog(); if(!remote){ alert("Nessun catalogo trovato su Drive, o Drive non connesso."); return; } DB=remote; migrate(); hide("ovSet"); go("home"); alert("Catalogo caricato da Drive."); };
 if(window.MineraStorage){ MineraStorage.onStatus=function(){ if(document.getElementById("ovSet").classList.contains("show")) openSettings(); }; }
 /* slot save */
 document.getElementById("sSave").onclick=()=>{ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===editSlotId); if(s){ s.name=document.getElementById("sName").value.trim()||s.name; s.type=document.getElementById("sType").value.trim(); s.occ=document.getElementById("sOcc").value.trim(); s.boxable=document.getElementById("sBoxable").checked; s.boxId=document.getElementById("sBoxId").value||null; s.w=parseInt(document.getElementById("sW").value,10)||null; s.d=parseInt(document.getElementById("sD").value,10)||null; s.h=parseInt(document.getElementById("sH").value,10)||null; } saveDB(); hide("ovSlot"); render(); };
