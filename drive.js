@@ -127,6 +127,15 @@
         });
     }).catch(function () { return false; });
   };
+  // Scarica una foto full-res da Drive e ritorna un object URL utilizzabile in <img>.
+  S.fetchPhoto = function (driveId) {
+    if (!driveId || !S.isDriveReady()) return Promise.resolve(null);
+    return api('https://www.googleapis.com/drive/v3/files/' + driveId + '?alt=media')
+      .then(function (r) { if (!r.ok) return null; return r.blob(); })
+      .then(function (b) { return b ? URL.createObjectURL(b) : null; })
+      .catch(function () { return null; });
+  };
+
   // Ispeziona il catalogo remoto SENZA modificare nulla in locale.
   // Ritorna {id, modifiedTime, origin, writtenAt, boxes, items} oppure null.
   S.peekCatalog = function () {

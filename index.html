@@ -248,6 +248,7 @@
   <div id="beCover"></div>
   <label class="capbtn"><input type="file" id="beCoverIn" accept="image/*" hidden>Acquisisci copertina (scatta/importa)</label>
   <label class="f" style="margin-top:8px"><span>Nome / codice</span><input id="beName"></label>
+  <div class="modal-a" style="margin-bottom:8px"><button class="ghost" id="beEmpty" style="flex:1;color:var(--brass)">Svuota box (elimina tutti gli oggetti)</button></div>
   <div class="modal-a"><button class="danger" id="beDelete">Elimina box</button><button class="save" id="beSave">Salva</button></div>
 </div></div>
 <div class="overlay" id="ovTrash"><div class="modal">
@@ -364,7 +365,7 @@ let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.10.0 · 2026-09-11";
+const APP_VERSION="v0.12.0 · 2026-09-12";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -380,16 +381,95 @@ function go(v,opts){ ST=Object.assign({view:v,cId:null,bId:null,ptab:ST.ptab||"e
 function crumb(){
   let h='<button data-nav="home">La Miniera</button>';
   if(ST.view==="container"){ const c=contById(ST.cId); h+='<span class="sep">›</span><span>'+esc(c.code)+'</span>'; }
+  if(ST.view==="valore"){ h+='<span class="sep">\u203a</span><span>Valore</span>'; }
   if(ST.view==="box"){ const b=boxById(ST.bId); const lk=boxLink(b.id);
     if(lk){ h+='<span class="sep">›</span><button data-nav="container" data-c="'+lk.c.id+'">'+esc(lk.c.code)+'</button>'; }
     h+='<span class="sep">›</span><span>'+esc(b.code)+'</span>'; }
   document.getElementById("crumb").innerHTML=h;
 }
 
+/* ---- VA livello 3: interrogazioni sul patrimonio consolidato ---- */
+function boxPath(bid){ let r=null;
+  (DB.containers||[]).forEach(c=>{ (c.slots||[]).forEach(s=>{ if(s.boxId===bid){ const rm=(DB.rooms||[]).find(x=>x.id===(c.roomId||DB.rooms[0].id)); r={room:rm?rm.name:'—',cont:c.code,slot:s.name}; } }); });
+  return r; }
+function allItems(){ const out=[]; (DB.boxes||[]).forEach(b=>{ const p=boxPath(b.id); (b.items||[]).forEach(it=>out.push({it:it,box:b,path:p})); }); return out; }
+function normName(s){ return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim(); }
+
+function renderValore(){
+  const all=allItems(); const kept=all.filter(x=>x.it.keep);
+  const tot=kept.reduce((s,x)=>s+(x.it.value!=null?Number(x.it.value):0),0);
+  const bb=kept.filter(x=>x.it.blackbox);
+  const noVal=kept.filter(x=>x.it.value==null&&!x.it.blackbox);
+  const out=all.filter(x=>!x.it.keep);
+  let h='<div class="codebar"><span class="dot box"></span><h1 style="font-size:26px">Valore</h1></div>';
+  h+='<div class="readout"><span class="u" style="font-size:20px;color:var(--brass);opacity:.7">€</span><span class="num" style="font-size:38px">'+new Intl.NumberFormat("it-IT",{maximumFractionDigits:0}).format(tot)+'</span></div>';
+  h+='<div class="meta"><b>'+kept.length+'</b> oggetti tenuti in <b>'+(DB.boxes||[]).length+'</b> box · <b>'+bb.length+'</b> da aprire · <b>'+out.length+'</b> scartati</div>';
+
+  h+='<div class="sect">Dov\u0027è… <span class="hint">cerca in tutta la miniera</span></div>';
+  h+='<input id="vaQ" placeholder="nome, categoria o tag (es. cavi, lucchetti, mozart)" style="width:100%;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:#e8e4dc;font-size:14px">';
+  h+='<div id="vaRes" style="margin-top:8px"></div>';
+
+  /* categorie */
+  const byCat={}; kept.forEach(x=>{ const c=x.it.category||'—'; byCat[c]=byCat[c]||{n:0,v:0}; byCat[c].n++; byCat[c].v+=(x.it.value!=null?Number(x.it.value):0); });
+  const cats=Object.keys(byCat).sort((a,b)=>byCat[b].v-byCat[a].v);
+  h+='<div class="sect">Patrimonio per categoria</div>';
+  const maxv=Math.max(1,...cats.map(c=>byCat[c].v));
+  cats.forEach(c=>{ const p=Math.round(byCat[c].v/maxv*100);
+    h+='<div style="margin-bottom:7px"><div style="display:flex;justify-content:space-between;font-size:12.5px;color:#ded9ce"><span>'+esc(c)+' <em style="color:#7a746a;font-style:normal">· '+byCat[c].n+'</em></span><span style="font-family:ui-monospace,Menlo,monospace;color:var(--brass)">'+eur(byCat[c].v,0)+'</span></div><div style="height:6px;background:#23262a;border-radius:4px;margin-top:3px"><div style="height:6px;width:'+p+'%;background:var(--brass);border-radius:4px"></div></div></div>'; });
+
+  /* box ranking */
+  h+='<div class="sect">Box per valore</div>';
+  const bx=(DB.boxes||[]).map(b=>{ const k=(b.items||[]).filter(i=>i.keep); return {b:b,n:k.length,v:k.reduce((s,i)=>s+(i.value!=null?Number(i.value):0),0),p:boxPath(b.id)}; }).sort((a,b)=>b.v-a.v);
+  bx.forEach(o=>{ h+='<div class="ccard" data-open-b="'+o.b.id+'"><div class="cc-b"><h3 style="color:#c69749">'+esc(o.b.code)+'</h3><div class="cc-s">'+o.n+' oggetti · '+eur(o.v,0)+(o.p?' · '+esc(o.p.cont)+' › '+esc(o.p.slot):' · da collocare')+'</div></div><span class="go">›</span></div>'; });
+
+  /* duplicati */
+  const seen={}; kept.forEach(x=>{ const k=normName(x.it.name); if(!k) return; (seen[k]=seen[k]||[]).push(x); });
+  const dups=Object.keys(seen).filter(k=>seen[k].length>1);
+  h+='<div class="sect">Possibili duplicati</div>';
+  if(!dups.length) h+='<div class="place">Nessun nome ripetuto.</div>';
+  else dups.forEach(k=>{ const g=seen[k]; h+='<div class="place" style="text-align:left"><b>'+esc(g[0].it.name)+'</b> — '+g.length+'× in '+g.map(x=>esc(x.box.code)).join(', ')+'</div>'; });
+
+  /* da aprire */
+  h+='<div class="sect">Da aprire <span class="hint">valore ancora ignoto</span></div>';
+  if(!bb.length) h+='<div class="place">Nessuna blackbox aperta in sospeso.</div>';
+  else bb.forEach(x=>{ h+='<div class="ccard" data-obj="'+x.it.id+'" data-gobox="'+x.box.id+'"><div class="cc-b"><h3>'+esc(x.it.name)+'</h3><div class="cc-s">'+esc(x.box.code)+(x.path?' · '+esc(x.path.slot):'')+'</div></div><span class="go">›</span></div>'; });
+
+  /* candidati uscita */
+  h+='<div class="sect">Candidati a uscire <span class="hint">scartati o di valore nullo</span></div>';
+  const cand=all.filter(x=>!x.it.keep||(x.it.value!=null&&Number(x.it.value)<=1&&!x.it.blackbox));
+  if(!cand.length) h+='<div class="place">Niente da smaltire per ora.</div>';
+  else { const cv=cand.reduce((s,x)=>s+(x.it.value!=null?Number(x.it.value):0),0);
+    h+='<div class="place" style="text-align:left">'+cand.length+' oggetti · '+eur(cv,0)+' complessivi</div>';
+    cand.slice(0,40).forEach(x=>{ h+='<div class="place" style="text-align:left;opacity:.8">'+esc(x.it.name)+' <em style="color:#7a746a">· '+esc(x.box.code)+'</em></div>'; }); }
+
+  /* qualita del dato */
+  h+='<div class="sect">Qualità del censimento</div>';
+  const noPhoto=kept.filter(x=>!x.it.photo).length;
+  const slots=[]; (DB.containers||[]).forEach(c=>(c.slots||[]).forEach(s=>{ if(s.boxable) slots.push(s); }));
+  const done=slots.filter(s=>s.boxId).length;
+  h+='<div class="place" style="text-align:left">Slot censiti: <b>'+done+'</b> su <b>'+slots.length+'</b><br>Oggetti senza foto: <b>'+noPhoto+'</b><br>Oggetti senza valore stimato: <b>'+noVal.length+'</b></div>';
+
+  h+='<div class="actions" style="margin-top:12px"><button class="ghost" data-vacsv="1" style="flex:1">Esporta tutto in CSV</button></div>';
+  document.getElementById("app").innerHTML=h;
+
+  const q=document.getElementById("vaQ");
+  q.oninput=()=>{ const v=normName(q.value); const r=document.getElementById("vaRes");
+    if(v.length<2){ r.innerHTML=''; return; }
+    const hits=all.filter(x=>normName(x.it.name+' '+(x.it.category||'')+' '+((x.it.tags||[]).join(' '))).includes(v)).slice(0,25);
+    if(!hits.length){ r.innerHTML='<div class="place">Nessun oggetto trovato.</div>'; return; }
+    r.innerHTML=hits.map(x=>'<div class="ccard" data-obj="'+x.it.id+'" data-gobox="'+x.box.id+'"><div class="cc-b"><h3>'+esc(x.it.name)+'</h3><div class="cc-s">'+(x.path?esc(x.path.room)+' › '+esc(x.path.cont)+' › '+esc(x.path.slot)+' › ':'')+esc(x.box.code)+(x.it.value!=null&&!x.it.blackbox?' · '+eur(x.it.value,0):'')+(x.it.keep?'':' · scartato')+'</div></div><span class="go">›</span></div>').join(''); };
+}
+function vaCsv(){ const rows=allItems().map(x=>[x.path?x.path.room:'',x.path?x.path.cont:'',x.path?x.path.slot:'',x.box.code,x.it.pass||'',x.it.name,x.it.category,x.it.qty,x.it.value==null?'':x.it.value,x.it.condition||'',x.it.blackbox?'da aprire':(x.it.keep?'tenuto':'scartato')]);
+  const head=["Stanza","Container","Slot","Box","Passata","Nome","Categoria","Qta","Valore","Condizione","Stato"];
+  const q=v=>'"'+String(v).replace(/"/g,'""')+'"';
+  const txt="\uFEFF"+[head].concat(rows).map(r=>r.map(q).join(";")).join("\n");
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([txt],{type:"text/csv"})); a.download="La Miniera - inventario completo.csv"; a.click(); }
+
 function render(){
   crumb();
   if(ST.view==="explore") return renderExplore();
   if(ST.view==="home") return renderHome();
+  if(ST.view==="valore") return renderValore();
   if(ST.view==="container") return renderContainer(contById(ST.cId));
   if(ST.view==="box") return renderBox(boxById(ST.bId));
 }
@@ -439,6 +519,7 @@ function renderHome(){
   h+='<div class="chips" style="margin:0 0 10px">'+DB.rooms.map(r=>'<button class="chip'+(r.id===ST.roomId?' chip-on':'')+'" data-room="'+r.id+'">'+esc(r.name)+'</button>').join('')+'<button class="chip" data-addroom="1">+ Stanza</button></div>';
   h+='<div class="plan-wrap"><div class="plan-top"><span class="rn">'+esc(room.name)+' · '+room.w+'×'+room.d+' cm</span><span><button data-roomedit="1">Stanza</button> <button data-planedit="1">'+(planEdit?"Fatto":"Disponi")+'</button></span></div>'+renderPlan()+'<div class="plan-hint">'+(planEdit?"Trascina i container · tocca un container per posizione, rotazione e misure":"Tocca un container per aprirlo · \u201cDisponi\u201d per spostarli")+'</div></div>';
   h+='<button class="addline" data-explore="1" style="border-style:solid;border-color:var(--brass);color:var(--brass);margin:2px 0 8px;font-weight:700">◆ Esplora — vista esplosa</button>';
+  h+='<button class="addline" data-valore="1" style="border-style:solid;border-color:var(--teal);color:var(--teal-hi);margin:2px 0 8px;font-weight:700">◈ Valore — interroga la miniera</button>';
   h+='<button class="addline" data-settings="1" style="margin:0 0 12px">Impostazioni · Drive</button>';
   const conts=DB.containers.filter(c=>(c.roomId||DB.rooms[0].id)===ST.roomId);
   h+='<div class="sect">Container in '+esc(room.name)+'</div>';
@@ -526,8 +607,40 @@ function renderBox(b){
     });
   });
   h+='<div class="actions"><button class="'+(b.done?"primary ghost":"primary")+'" data-done="1">'+(b.done?"Riapri":"Completa scatola")+'</button><button class="ghost" data-csv="1">CSV</button></div>';
+  h+='<div class="actions" style="margin-top:10px"><label class="capbtn" style="flex:1;text-align:center"><input type="file" id="bulkIn" accept="image/*" multiple hidden>+ Carica foto in blocco (una per oggetto)</label></div>';
   h+='<div class="actions" style="margin-top:10px"><button class="ghost" data-boxedit="'+b.id+'" style="flex:1">Modifica box · copertina · elimina</button></div>';
   document.getElementById("app").innerHTML=h;
+  const bi=document.getElementById("bulkIn");
+  if(bi) bi.onchange=async(e)=>{
+    const fs=Array.from(e.target.files||[]); e.target.value="";
+    if(!fs.length) return;
+    const bx=curBox(); const senza=bx.items.filter(i=>!i.photo);
+    let mode="new";
+    if(senza.length){
+      mode=confirm(fs.length+" foto selezionate.\n\nOK = assegnale in ordine ai "+senza.length+" oggetti SENZA foto\nAnnulla = crea "+fs.length+" nuovi oggetti da identificare")?"assign":"new";
+    }
+    const drive=window.MineraStorage&&MineraStorage.isDriveReady&&MineraStorage.isDriveReady();
+    if(!drive && !confirm("Drive non connesso: le foto full-res NON verranno salvate, resteranno solo le miniature locali. Procedere comunque?")) return;
+    const app=document.getElementById("app");
+    const prog=document.createElement("div"); prog.className="note"; prog.style.cssText="position:fixed;left:0;right:0;bottom:0;padding:10px;background:var(--panel);border-top:1px solid var(--line);text-align:center;z-index:60"; app.appendChild(prog);
+    let ok=0,fail=0;
+    for(let i=0;i<fs.length;i++){
+      const f=fs[i];
+      prog.textContent="Caricamento "+(i+1)+" di "+fs.length+"…";
+      try{
+        const thumb=await resizeDataURL(f,720,0.62);
+        let driveId=null;
+        if(drive){ try{ const nm=(bx.code+"__bulk__"+(i+1)+"__"+Date.now()+".jpg").replace(/[^A-Za-z0-9._-]+/g,"_"); const up=await MineraStorage.uploadPhoto(f,nm); if(up&&up.id) driveId=up.id; }catch(err){} }
+        if(mode==="assign" && i<senza.length){ senza[i].photo=thumb; if(driveId) senza[i].driveId=driveId; }
+        else { bx.items.push({id:"i"+Date.now()+Math.floor(Math.random()*1e4),pass:1,name:"Da identificare "+(bx.items.length+1),category:"Scatole & varie",qty:1,value:null,condition:"",tags:[],keep:true,blackbox:false,photo:thumb,driveId:driveId}); }
+        ok++;
+      }catch(err){ fail++; }
+      if(!saveDB()){ prog.remove(); alert("Memoria del browser piena dopo "+ok+" foto. Sincronizza su Drive e riprova."); render(); return; }
+    }
+    prog.remove();
+    alert("Caricate "+ok+" foto"+(fail?" ("+fail+" fallite)":"")+(drive?".\nFull-res su Drive, miniature in locale.":".\nSolo miniature locali."));
+    render();
+  };
 }
 
 /* ---- box helpers ---- */
@@ -540,10 +653,20 @@ function csvText(b){ const head=["Box","Passata","Nome","Categoria","Qta","Valor
 function openObject(id){ const b=curBox(),M=boxMedia(); const it=b.items.find(i=>i.id===id); if(!it) return;
   const p=(M.best&&M.best[id])||it.pass;
   const im=it.photo||M.obj[id];
-  const img=im?'<img class="lb-obj" src="'+im+'">':'';
-  const btn=M.hd[p]?'<button class="lb-btn" data-pass="'+p+'">Vedi la passata intera in HD →</button>':'';
-  document.getElementById("lightBody").innerHTML='<div class="modal-h"><h2>'+esc(it.name)+'</h2><button class="x" data-close="ovLight">✕</button></div>'+img+'<p class="lb-cap">'+esc(it.category)+(it.value!=null&&!it.blackbox?' · '+eur(it.value,0):'')+((M.best&&M.best[id])?' · trovato in '+PASS_SHORT[M.best[id]]:'')+'</p>'+btn;
+  const img=im?'<img class="lb-obj" src="'+im+'">':'<p class="note" style="padding:14px 0">Nessuna miniatura per questo oggetto.</p>';
+  let btn=M.hd[p]?'<button class="lb-btn" data-pass="'+p+'">Vedi la passata intera in HD →</button>':'';
+  if(it.driveId) btn='<button class="lb-btn" data-hd="'+it.id+'">Vedi foto HD da Drive →</button>'+btn;
+  const edit='<button class="lb-btn" data-edit="'+it.id+'" style="border-color:var(--teal);color:var(--teal-hi)">Modifica scheda oggetto ✎</button>';
+  document.getElementById("lightBody").innerHTML='<div class="modal-h"><h2>'+esc(it.name)+'</h2><button class="x" data-close="ovLight">✕</button></div>'+img+'<p class="lb-cap">'+esc(it.category)+(it.value!=null&&!it.blackbox?' · '+eur(it.value,0):'')+(it.condition?' · '+esc(it.condition):'')+((M.best&&M.best[id])?' · trovato in '+PASS_SHORT[M.best[id]]:'')+'</p>'+edit+btn;
   show("ovLight"); }
+async function openHD(id){ const it=curBox().items.find(i=>i.id===id); if(!it||!it.driveId) return;
+  const S=window.MineraStorage;
+  if(!S||!S.isDriveReady||!S.isDriveReady()){ alert("Connetti Drive per vedere la foto in HD."); return; }
+  const body=document.getElementById("lightBody");
+  body.innerHTML='<div class="modal-h"><h2>'+esc(it.name)+'</h2><button class="x" data-close="ovLight">✕</button></div><p class="lb-cap">caricamento della foto HD da Drive…</p>';
+  const url=await S.fetchPhoto(it.driveId);
+  if(!url){ body.innerHTML='<div class="modal-h"><h2>'+esc(it.name)+'</h2><button class="x" data-close="ovLight">✕</button></div><p class="lb-cap">Foto HD non recuperabile da Drive.</p>'; return; }
+  body.innerHTML='<div class="modal-h"><h2>'+esc(it.name)+'</h2><button class="x" data-close="ovLight">✕</button></div><p class="lb-cap">tocca la foto per lo zoom</p><div class="lb-hdwrap"><img class="lb-hd" id="hdImg" src="'+url+'"></div><button class="lb-btn" data-obj="'+it.id+'">‹ Torna alla scheda</button>'; }
 function openPass(p){ const b=curBox(),M=boxMedia();
   const list=b.items.filter(i=>i.pass===p).map(i=>'<div class="ll'+(i.keep?"":" off")+'" style="display:flex;justify-content:space-between;gap:10px;font-size:13px;color:#ded9ce;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:5px"><span>'+esc(i.name)+'</span><span style="font-family:ui-monospace,Menlo,monospace;color:var(--brass)">'+(i.blackbox?"da aprire":(i.value!=null?eur(i.value,0):"—"))+'</span></div>').join("");
   document.getElementById("lightBody").innerHTML='<div class="modal-h"><h2>'+PASS_LABEL[p]+'</h2><button class="x" data-close="ovLight">✕</button></div><p class="lb-cap">tocca la foto per lo zoom</p><div class="lb-hdwrap"><img class="lb-hd" id="hdImg" src="'+M.hd[p]+'"></div>'+list;
@@ -642,12 +765,19 @@ function ceSaveFn(){ const c=contById(editContId); if(!c) return; c.code=documen
 function ceDeleteFn(){ const c=contById(editContId); if(!c) return; if(!confirm('Eliminare il container "'+c.code+'"? I box collegati diventano non collocati; le foto vanno nel cestino.')) return; DB.photoTrash=DB.photoTrash||[]; if(c.estetico) DB.photoTrash.push({id:'t'+Date.now(),url:c.estetico,label:c.code+' · estetico'}); if(c.funzionale) DB.photoTrash.push({id:'t'+(Date.now()+1),url:c.funzionale,label:c.code+' · funzionale'}); DB.containers=DB.containers.filter(x=>x.id!==editContId); saveDB(); hide('ovCont'); go('home'); }
 function openBoxEdit(bid){ const b=boxById(bid); if(!b) return; editBoxId=bid; document.getElementById('beName').value=b.code; document.getElementById('beCover').innerHTML=b.cover?'<div class="photo" style="margin-bottom:6px"><img src="'+b.cover+'" style="max-height:24vh;object-fit:cover"></div>':''; const ci=document.getElementById('beCoverIn'); ci.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; await captureTo(f,b,'cover'); openBoxEdit(bid); }; show('ovBox'); }
 function beSaveFn(){ const b=boxById(editBoxId); if(!b) return; b.code=document.getElementById('beName').value.trim()||b.code; saveDB(); hide('ovBox'); render(); }
+function emptyBoxFn(){ const b=boxById(editBoxId); if(!b) return;
+  const n=b.items.length;
+  if(!n){ alert("Il box e\u0027 gia\u0027 vuoto."); return; }
+  if(!confirm("Svuotare il box \""+b.code+"\"?\n\n"+n+" oggetti verranno eliminati. Le foto finiscono nel cestino per riuso.\nIl box e il suo aggancio allo slot restano.")) return;
+  DB.photoTrash=DB.photoTrash||[];
+  b.items.forEach(it=>{ if(it.photo) DB.photoTrash.push({id:"t"+Date.now()+Math.floor(Math.random()*1e4),url:it.photo,label:it.name}); });
+  b.items=[]; b.done=false; saveDB(); hide("ovBox"); render(); }
 function deleteBoxFn(){ const b=boxById(editBoxId); if(!b) return; if(!confirm('Eliminare il box "'+b.code+'"? Le foto restano nel cestino per riuso.')) return; DB.photoTrash=DB.photoTrash||[]; b.items.forEach(it=>{ if(it.photo) DB.photoTrash.push({id:'t'+Date.now()+Math.floor(Math.random()*1e4),url:it.photo,label:it.name}); }); if(b.cover) DB.photoTrash.push({id:'t'+Date.now()+'c',url:b.cover,label:b.code}); DB.containers.forEach(c=>(c.slots||[]).forEach(s=>{ if(s.boxId===editBoxId) s.boxId=null; })); DB.boxes=DB.boxes.filter(x=>x.id!==editBoxId); saveDB(); hide('ovBox'); go('home'); }
 function openTrash(applyFn,reopenFn){ trashApply=applyFn||null; trashReopen=reopenFn||null; const g=document.getElementById('trashGrid'); const tr=DB.photoTrash||[]; g.innerHTML=tr.length?tr.map(p=>'<button class="otile" data-trashpick="'+p.id+'" title="'+esc(p.label||'')+'"><img src="'+p.url+'"><span class="ocap">'+esc(p.label||'')+'</span></button>').join(''):'<p class="note">Cestino vuoto. Le foto dei box eliminati finiscono qui.</p>'; show('ovTrash'); }
 document.addEventListener("click",e=>{
   if(e.target.id==="hdImg"){ e.target.classList.toggle("zoom"); return; }
   if(e.target.classList.contains("stage")){ exBack(); return; }
-  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview],[data-room],[data-addroom],[data-newcont],[data-contedit],[data-boxedit],[data-trashpick],[data-slotkind],[data-slprm],[data-sldrm]");
+  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview],[data-room],[data-addroom],[data-newcont],[data-contedit],[data-boxedit],[data-trashpick],[data-slotkind],[data-slprm],[data-sldrm],[data-hd],[data-edit],[data-valore],[data-vacsv],[data-gobox]");
   if(!t){ if(e.target.classList.contains("overlay")) e.target.classList.remove("show"); return; }
   const d=t.dataset;
   if(d.nav==="home") go("home");
@@ -659,7 +789,12 @@ document.addEventListener("click",e=>{
   else if(d.ptab!==undefined){ ST.ptab=d.ptab; render(); }
   else if(d.cphoto!==undefined){ ST.ptab==="est"?0:0; const c=contById(ST.cId); const M=CONT_MEDIA[c.id]; document.getElementById("lightBody").innerHTML='<div class="modal-h"><h2>'+(ST.ptab==="est"?"Estetico":"Funzionale")+'</h2><button class="x" data-close="ovLight">✕</button></div><p class="lb-cap">tocca la foto per lo zoom</p><div class="lb-hdwrap"><img class="lb-hd" id="hdImg" src="'+(ST.ptab==="est"?M.estetico:M.funzionale)+'"></div>'; show("ovLight"); }
   else if(d.pass!==undefined) openPass(parseInt(d.pass,10));
+  else if(d.valore!==undefined) go("valore");
+  else if(d.vacsv!==undefined) vaCsv();
+  else if(d.gobox!==undefined){ ST.bId=d.gobox; openObject(d.obj); }
   else if(d.obj!==undefined) openObject(d.obj);
+  else if(d.hd!==undefined) openHD(d.hd);
+  else if(d.edit!==undefined){ hide("ovLight"); openItem(d.edit); }
   else if(d.item!==undefined) openItem(d.item);
   else if(d.keep!==undefined){ const b=curBox(); const it=b.items.find(i=>i.id===d.keep); if(it){it.keep=!it.keep; saveDB(); render();} }
   else if(d.done!==undefined){ const b=curBox(); b.done=!b.done; saveDB(); render(); }
@@ -693,6 +828,7 @@ document.getElementById("ceSave").onclick=ceSaveFn;
 document.getElementById("ceDelete").onclick=ceDeleteFn;
 document.getElementById("beSave").onclick=beSaveFn;
 document.getElementById("beDelete").onclick=deleteBoxFn;
+document.getElementById("beEmpty").onclick=emptyBoxFn;
 document.getElementById("setSaveId").onclick=()=>{ const S=window.MineraStorage; if(S&&S.setClientId) S.setClientId(document.getElementById("setClient").value); openSettings(); };
 document.getElementById("setConnect").onclick=()=>{ const S=window.MineraStorage; if(!S){ alert("Modulo Drive non caricato."); return; } S.setClientId(document.getElementById("setClient").value); S.connect(()=>openSettings()); };
 document.getElementById("setSync").onclick=async()=>{
