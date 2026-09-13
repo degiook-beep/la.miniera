@@ -102,7 +102,26 @@
         origin: 'app', app: 'La Miniera', writtenAt: new Date().toISOString()
       });
     } catch (e) {}
-    var content = new Blob([JSON.stringify(obj)], { type: 'application/json' });
+    // Il catalogo su Drive porta SOLO i riferimenti (driveId), mai i base64:
+    // resta leggero e riscrivibile. Le miniature restano nel localStorage e,
+    // per chi ricarica, vengono riprese da Drive con fetchPhoto().
+    // Le foto SENZA driveId non vengono toccate: sono l'unica copia esistente.
+    var slim = obj;
+    try {
+      slim = JSON.parse(JSON.stringify(obj));
+      (slim.boxes || []).forEach(function (b) {
+        (b.items || []).forEach(function (it) { if (it.driveId && it.photo) delete it.photo; });
+      });
+      (slim.containers || []).forEach(function (c) {
+        (c.slots || []).forEach(function (s) {
+          if (s.extPhotoDriveId && s.extPhoto) s.extPhoto = null;
+          (s.passPhotos || []).forEach(function (p) { if (p.driveId && p.url) p.url = null; });
+          (s.detailPhotos || []).forEach(function (p) { if (p.driveId && p.url) p.url = null; });
+        });
+      });
+      (slim.photoTrash || []).forEach(function (p) { if (p.url) p.url = null; });
+    } catch (e) { slim = obj; }
+    var content = new Blob([JSON.stringify(slim)], { type: 'application/json' });
     function createNew() {
       var meta = { name: 'la-miniera-catalog.json', parents: inboxId ? [inboxId] : undefined };
       var form = new FormData();

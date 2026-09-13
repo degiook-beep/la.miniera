@@ -365,7 +365,7 @@ let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.12.0 · 2026-09-12";
+const APP_VERSION="v0.13.0 · 2026-09-13";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -465,13 +465,43 @@ function vaCsv(){ const rows=allItems().map(x=>[x.path?x.path.room:'',x.path?x.p
   const txt="\uFEFF"+[head].concat(rows).map(r=>r.map(q).join(";")).join("\n");
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([txt],{type:"text/csv"})); a.download="La Miniera - inventario completo.csv"; a.click(); }
 
+/* Ricostruisce le miniature mancanti scaricando da Drive i soli oggetti che
+   hanno driveId ma non photo (catalogo arrivato "spoglio" dal backend). */
+let HYDRATING=false;
+async function hydrateBox(b){
+  if(HYDRATING||!b) return;
+  const miss=(b.items||[]).filter(i=>i.driveId&&!i.photo);
+  if(!miss.length) return;
+  const S=window.MineraStorage;
+  if(!S||!S.isDriveReady||!S.isDriveReady()) return;
+  HYDRATING=true;
+  const n=document.createElement("div"); n.className="note";
+  n.style.cssText="position:fixed;left:0;right:0;bottom:0;padding:9px;background:var(--panel);border-top:1px solid var(--line);text-align:center;z-index:60";
+  document.body.appendChild(n);
+  let done=0;
+  for(const it of miss){
+    n.textContent="Recupero miniature da Drive… "+(done+1)+"/"+miss.length;
+    try{
+      const url=await S.fetchPhoto(it.driveId);
+      if(url){ const t=await urlToThumb(url,720,0.62); if(t) it.photo=t; URL.revokeObjectURL(url); }
+    }catch(e){}
+    done++;
+  }
+  n.remove(); HYDRATING=false;
+  if(!saveDB()) alert("Miniature recuperate ma memoria locale piena: alcune non sono state salvate.");
+  render();
+}
+function urlToThumb(url,max,q){ return new Promise(res=>{ const im=new Image(); im.onload=()=>{ const sc=Math.min(1,max/Math.max(im.width,im.height)); const cv=document.createElement("canvas"); cv.width=Math.round(im.width*sc); cv.height=Math.round(im.height*sc); cv.getContext("2d").drawImage(im,0,0,cv.width,cv.height); try{res(cv.toDataURL("image/jpeg",q));}catch(e){res(null);} }; im.onerror=()=>res(null); im.src=url; }); }
+
+function slotChips(c){ return (c.slots||[]).map(s=>{ if(s.px==null) return ''; const lb=s.boxId?boxById(s.boxId):null; const cls=lb?'exchip box':'exchip'; const label=lb?lb.code:(s.name.split('\u00b7').pop().trim()); const dr=lb?' data-drill="b:'+lb.id+'"':''; return '<span class="'+cls+'" style="left:'+(s.px*100)+'%;top:'+(s.py*100)+'%"'+dr+'>'+esc(label)+'</span>'; }).join(''); }
+
 function render(){
   crumb();
   if(ST.view==="explore") return renderExplore();
   if(ST.view==="home") return renderHome();
   if(ST.view==="valore") return renderValore();
   if(ST.view==="container") return renderContainer(contById(ST.cId));
-  if(ST.view==="box") return renderBox(boxById(ST.bId));
+  if(ST.view==="box"){ const _b=boxById(ST.bId); renderBox(_b); hydrateBox(_b); return; }
 }
 
 function doorArc(room){ const dw=Math.min(80,room.w*0.22); const x=room.w*0.55; return '<path class="door" d="M'+x+' '+(room.d-2)+' a'+dw+' '+dw+' 0 0 1 '+dw+' '+(-dw)+'"></path>'; }
@@ -550,7 +580,7 @@ function renderContainer(c){
    +'<div class="meta"><b>'+esc(c.type)+'</b> · '+esc(c.room)+' · <b>'+boxSlots.length+'</b> slot box</div>'
    +'<button class="addline" data-contedit="'+c.id+'" style="margin:10px 0 2px">Modifica container · foto (estetico/funzionale)</button>'
    +'<div class="tabs"><button class="tab'+(ST.ptab==="est"?" on":"")+'" data-ptab="est">Estetico</button><button class="tab'+(ST.ptab==="fun"?" on":"")+'" data-ptab="fun">Funzionale</button></div>'
-   +'<div class="photo">'+(src?'<img data-cphoto="1" src="'+src+'"><span class="cap">'+cap+'</span>':'')+'</div>'
+   +'<div class="photo" style="position:relative">'+(src?'<img data-cphoto="1" src="'+src+'"><span class="cap">'+cap+'</span>'+(ST.ptab==="fun"?slotChips(c):''):'')+'</div>'
    +'<div class="sect">Censimento</div><div class="census">'
    +'<div class="row"><span class="k">Dim. esterne</span><span class="v">'+c.dimW+'×'+c.dimD+'×'+c.dimH+' cm ('+volExt+' L)</span></div>'
    +'<div class="row"><span class="k">Volume utile (somma slot)</span><span class="v">'+usable+' L · '+pct+'%</span></div>'
