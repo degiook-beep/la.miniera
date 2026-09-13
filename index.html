@@ -190,6 +190,10 @@
 <body>
 <div class="wrap">
   <div class="crumb" id="crumb"></div>
+  <div id="driveBar" data-settings="1" style="display:flex;align-items:center;gap:7px;padding:5px 12px 8px;font-size:12px;cursor:pointer;user-select:none">
+    <span id="driveDot" style="width:8px;height:8px;border-radius:50%;background:#6b6b6b;flex:0 0 auto"></span>
+    <span id="driveTxt" style="color:#8b857a">Drive: verifica…</span>
+  </div>
   <div id="app"></div>
   <div class="foot">La Miniera · Stanza → Container → Slot → Box → Oggetto · dati salvati su questo browser · <span id="appver" style="color:#7a7468;font-family:ui-monospace,Menlo,monospace"></span></div>
 </div>
@@ -365,7 +369,7 @@ let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.15.0 · 2026-09-13";
+const APP_VERSION="v0.16.0 · 2026-09-13";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -467,32 +471,62 @@ function vaCsv(){ const rows=allItems().map(x=>[x.path?x.path.room:'',x.path?x.p
 
 /* Ricostruisce le miniature mancanti scaricando da Drive i soli oggetti che
    hanno driveId ma non photo (catalogo arrivato "spoglio" dal backend). */
+function updateDriveBar(){
+  const dot=document.getElementById("driveDot"), txt=document.getElementById("driveTxt");
+  if(!dot||!txt) return;
+  const S=window.MineraStorage;
+  const on=!!(S&&S.isDriveReady&&S.isDriveReady());
+  dot.style.background=on?"#4bbf8a":"#6b6b6b";
+  txt.style.color=on?"#7fbfa3":"#8b857a";
+  txt.textContent=on?"Drive connesso · backend attivo":"Solo locale · tocca per connettere Drive";
+}
+setInterval(updateDriveBar,2000);
+
+// Barra di avanzamento ben visibile in alto
+function progressBar(label){
+  let w=document.getElementById("hydBar");
+  if(!w){ w=document.createElement("div"); w.id="hydBar";
+    w.style.cssText="position:fixed;left:0;right:0;top:0;z-index:90;background:var(--panel);border-bottom:1px solid var(--brass);padding:10px 14px;box-shadow:0 4px 18px rgba(0,0,0,.5)";
+    w.innerHTML='<div id="hydTxt" style="font-size:13px;color:var(--brass);font-weight:700;margin-bottom:6px"></div><div style="height:5px;background:#23262a;border-radius:4px;overflow:hidden"><div id="hydFill" style="height:5px;width:0%;background:var(--brass);transition:width .18s"></div></div>';
+    document.body.appendChild(w); }
+  document.getElementById("hydTxt").textContent=label;
+  return {
+    set:(i,tot)=>{ document.getElementById("hydTxt").textContent=label+"  "+i+" / "+tot;
+                   document.getElementById("hydFill").style.width=Math.round(i/tot*100)+"%"; },
+    done:()=>{ const e=document.getElementById("hydBar"); if(e) e.remove(); }
+  };
+}
+
+// driveId che hanno gia' fallito: non si riprovano in automatico (evita il loop)
+const HYD_FAILED=new Set();
 let HYDRATING=false;
 function toast(msg){ const n=document.createElement("div"); n.className="note"; n.textContent=msg;
   n.style.cssText="position:fixed;left:12px;right:12px;bottom:14px;padding:10px 12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;text-align:center;z-index:70";
   document.body.appendChild(n); setTimeout(()=>n.remove(),4200); }
-async function hydrateBox(b){
+async function hydrateBox(b,manual){
   if(HYDRATING||!b) return;
-  const miss=(b.items||[]).filter(i=>i.driveId&&!i.photo);
-  if(!miss.length) return;
+  if(manual) HYD_FAILED.clear();
+  const miss=(b.items||[]).filter(i=>i.driveId&&!i.photo&&!HYD_FAILED.has(i.driveId));
+  if(!miss.length){ if(manual) toast("Nessuna foto da recuperare."); return; }
   const S=window.MineraStorage;
-  if(!S||!S.isDriveReady||!S.isDriveReady()){ toast("Drive non connesso: impossibile recuperare le foto ora. Connetti Drive dalle Impostazioni e riapri il box."); return; }
+  if(!S||!S.isDriveReady||!S.isDriveReady()){ toast("Drive non connesso \u2014 tocca la barra di stato in alto per connetterlo."); return; }
   HYDRATING=true;
-  const n=document.createElement("div"); n.className="note";
-  n.style.cssText="position:fixed;left:0;right:0;bottom:0;padding:9px;background:var(--panel);border-top:1px solid var(--line);text-align:center;z-index:60";
-  document.body.appendChild(n);
-  let done=0;
-  for(const it of miss){
-    n.textContent="Recupero miniature da Drive… "+(done+1)+"/"+miss.length;
+  const pb=progressBar("Recupero foto da Drive");
+  let ok=0,ko=0;
+  for(let k=0;k<miss.length;k++){
+    const it=miss[k]; pb.set(k+1,miss.length);
+    let got=false;
     try{
       const url=await S.fetchPhoto(it.driveId);
-      if(url){ const t=await urlToThumb(url,720,0.62); if(t) it.photo=t; URL.revokeObjectURL(url); }
+      if(url){ const t=await urlToThumb(url,720,0.62); if(t){ it.photo=t; got=true; } URL.revokeObjectURL(url); }
     }catch(e){}
-    done++;
+    if(got) ok++; else { ko++; HYD_FAILED.add(it.driveId); }
   }
-  n.remove(); HYDRATING=false;
-  if(!saveDB()) alert("Miniature recuperate ma memoria locale piena: alcune non sono state salvate.");
-  render();
+  pb.done(); HYDRATING=false;
+  if(ok && !saveDB()) toast("Foto recuperate ma memoria locale piena.");
+  if(ko) toast(ok+" foto recuperate, "+ko+" non disponibili su Drive. Usa \u21bb per riprovare.");
+  else if(manual) toast(ok+" foto recuperate.");
+  if(ok) render();            // ridisegna SOLO se qualcosa e' cambiato: niente loop
 }
 function urlToThumb(url,max,q){ return new Promise(res=>{ const im=new Image(); im.onload=()=>{ const sc=Math.min(1,max/Math.max(im.width,im.height)); const cv=document.createElement("canvas"); cv.width=Math.round(im.width*sc); cv.height=Math.round(im.height*sc); cv.getContext("2d").drawImage(im,0,0,cv.width,cv.height); try{res(cv.toDataURL("image/jpeg",q));}catch(e){res(null);} }; im.onerror=()=>res(null); im.src=url; }); }
 
@@ -641,10 +675,10 @@ function renderBox(b){
   });
   h+='<div class="actions"><button class="'+(b.done?"primary ghost":"primary")+'" data-done="1">'+(b.done?"Riapri":"Completa scatola")+'</button><button class="ghost" data-csv="1">CSV</button></div>';
   h+='<div class="actions" style="margin-top:10px"><label class="capbtn" style="flex:1;text-align:center"><input type="file" id="bulkIn" accept="image/*" multiple hidden>+ Carica foto in blocco (una per oggetto)</label></div>';
-  if((b.items||[]).some(i=>i.driveId&&!i.photo)) h+='<div class="actions" style="margin-top:10px"><button class="ghost" id="btnRehydrate" style="flex:1">↻ Recupera foto da Drive</button></div>';
+  h+='<div class="actions" style="margin-top:10px"><button class="ghost" id="btnRehydrate" style="flex:1">↻ Recupera foto da Drive</button></div>';
   h+='<div class="actions" style="margin-top:10px"><button class="ghost" data-boxedit="'+b.id+'" style="flex:1">Modifica box · copertina · elimina</button></div>';
   document.getElementById("app").innerHTML=h;
-  const rh=document.getElementById("btnRehydrate"); if(rh) rh.onclick=()=>hydrateBox(b);
+  const rh=document.getElementById("btnRehydrate"); if(rh) rh.onclick=()=>hydrateBox(b,true);
   const bi=document.getElementById("bulkIn");
   if(bi) bi.onchange=async(e)=>{
     const fs=Array.from(e.target.files||[]); e.target.value="";
@@ -732,6 +766,7 @@ function openSlot(id){ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===
   if(s.contains==="box"){ const pp=s.passPhotos||[];
     ph+='<div class="f"><span>Passate (svuotamento a strati)</span><div class="ogrid" style="margin-bottom:8px">'+pp.map((p,i)=>'<div class="otile"><img src="'+p.url+'"><span class="ocap">P'+(i+1)+'</span><button class="mini-x" data-slprm="'+p.id+'">✕</button></div>').join('')+'</div><label class="capbtn"><input type="file" id="slPassIn" accept="image/*" hidden>+ Aggiungi passata (scatta/importa)</label></div>';
     ph+='<div class="f"><span>Dettagli / singoli pezzi <em style="font-weight:400;color:#7a746a">facoltativo · migliorano il riconoscimento</em></span><div class="ogrid" style="margin-bottom:8px">'+(s.detailPhotos||[]).map(p=>'<div class="otile"><img src="'+p.url+'">'+(p.name?'<span class="ocap">'+esc(p.name)+'</span>':'')+'<button class="mini-x" data-sldrm="'+p.id+'">✕</button></div>').join('')+'</div><label class="capbtn"><input type="file" id="slDetIn" accept="image/*" hidden>+ Aggiungi dettaglio (scatta/importa)</label></div>';
+    ph+='<div class="actions" style="margin-top:6px"><button class="ghost" id="btnSlotRehy" style="flex:1">\u21bb Recupera foto da Drive</button></div>';
   }
   document.getElementById("slotPhoto").innerHTML=ph;
   const ei=document.getElementById("slExtIn"); if(ei) ei.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; await captureTo(f,s,'extPhoto'); openSlot(id); };
@@ -744,34 +779,38 @@ function openSlot(id){ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===
   const sel=document.getElementById("sBoxId");
   sel.innerHTML='<option value="">— nessuno —</option>'+DB.boxes.map(b=>'<option value="'+b.id+'"'+(s.boxId===b.id?' selected':'')+'>'+esc(b.code)+'</option>').join("");
   document.getElementById("assignNote").textContent=s.boxId?'Collegato: toccando "Apri" entri nel box.':(s.contains==="box"?'Le passate qui sono materiale grezzo: le elaboro io per creare il box catalogato collegato.':'Assegna un box catalogato per collegarlo a questo slot.');
+  const sr=document.getElementById("btnSlotRehy"); if(sr) sr.onclick=()=>hydrateSlot(s,true);
+  updateDriveBar();
   show("ovSlot"); hydrateSlot(s); }
 
 let HYDRATING_SLOT=false;
-async function hydrateSlot(s){
+async function hydrateSlot(s,manual){
   if(HYDRATING_SLOT) return;
+  if(manual) HYD_FAILED.clear();
   const miss=[];
-  if(s.extPhotoDriveId && !s.extPhoto) miss.push({get:()=>s.extPhotoDriveId, set:(t)=>{s.extPhoto=t;}});
-  (s.passPhotos||[]).forEach(p=>{ if(p.driveId && !p.url) miss.push({get:()=>p.driveId, set:(t)=>{p.url=t;}}); });
-  (s.detailPhotos||[]).forEach(p=>{ if(p.driveId && !p.url) miss.push({get:()=>p.driveId, set:(t)=>{p.url=t;}}); });
-  if(!miss.length) return;
+  const add=(id,setter)=>{ if(id && !HYD_FAILED.has(id)) miss.push({id:id,set:setter}); };
+  if(s.extPhotoDriveId && !s.extPhoto) add(s.extPhotoDriveId,(t)=>{s.extPhoto=t;});
+  (s.passPhotos||[]).forEach(p=>{ if(!p.url) add(p.driveId,(t)=>{p.url=t;}); });
+  (s.detailPhotos||[]).forEach(p=>{ if(!p.url) add(p.driveId,(t)=>{p.url=t;}); });
+  if(!miss.length){ if(manual) toast("Nessuna foto da recuperare."); return; }
   const S=window.MineraStorage;
-  if(!S||!S.isDriveReady||!S.isDriveReady()){ toast("Drive non connesso: impossibile recuperare le foto ora. Connetti Drive dalle Impostazioni e riapri lo slot."); return; }
+  if(!S||!S.isDriveReady||!S.isDriveReady()){ toast("Drive non connesso \u2014 tocca la barra di stato in alto per connetterlo."); return; }
   HYDRATING_SLOT=true;
-  const host=document.getElementById("slotPhoto");
-  const prog=document.createElement("div"); prog.className="note"; prog.style.cssText="padding:6px 0";
-  if(host) host.prepend(prog);
-  let done=0;
-  for(const m of miss){
-    if(prog) prog.textContent="Recupero foto da Drive… "+(done+1)+"/"+miss.length;
+  const pb=progressBar("Recupero foto slot da Drive");
+  let ok=0,ko=0;
+  for(let k=0;k<miss.length;k++){
+    const m=miss[k]; pb.set(k+1,miss.length);
+    let got=false;
     try{
-      const url=await S.fetchPhoto(m.get());
-      if(url){ const t=await urlToThumb(url,760,0.6); if(t) m.set(t); URL.revokeObjectURL(url); }
+      const url=await S.fetchPhoto(m.id);
+      if(url){ const t=await urlToThumb(url,760,0.6); if(t){ m.set(t); got=true; } URL.revokeObjectURL(url); }
     }catch(e){}
-    done++;
+    if(got) ok++; else { ko++; HYD_FAILED.add(m.id); }
   }
-  HYDRATING_SLOT=false;
-  if(!saveDB()){ alert("Foto recuperate ma memoria locale piena: alcune potrebbero non essere salvate."); }
-  if(editSlotId===s.id) openSlot(s.id);
+  pb.done(); HYDRATING_SLOT=false;
+  if(ok) saveDB();
+  if(ko) toast(ok+" foto recuperate, "+ko+" non disponibili su Drive.");
+  if(ok && editSlotId===s.id) openSlot(s.id);
 }
 
 function exTitle(){ if(ST.exLevel==='container'){return esc(contById(ST.exC).code);} if(ST.exLevel==='box'){return esc(boxById(ST.exB).code);} if(ST.exLevel==='layer'){return esc(boxById(ST.exB).code)+' · '+PASS_SHORT[ST.exPass];} return esc(DB.rooms[0].name)+' · esploso'; }
@@ -784,8 +823,7 @@ function exBox(photo){ const b=boxById(ST.exB); const M=BOX_MEDIA[b.id]||{obj:{}
   if(ST.boxView!=="strati"){
     const tiles=b.items.map((it,i)=>{ const im=it.photo||M.obj[it.id]; const val=it.blackbox?"da aprire":(it.value!=null?eur(it.value,0):"—");
       return '<button class="otile'+(it.keep?"":" dim")+'" data-obj="'+it.id+'" style="animation-delay:'+(i*28)+'ms" title="'+esc(it.name)+" · "+val+'">'+(im?'<img src="'+im+'">':'<span class="oletter">'+esc((it.name[0]||"?").toUpperCase())+'</span>')+'<span class="ocap">'+esc(it.name)+'<em>'+val+'</em></span></button>'; }).join("");
-    const needsHydrate=(b.items||[]).some(i=>i.driveId&&!i.photo);
-    const rh=needsHydrate?'<div class="actions" style="margin:10px 0"><button class="ghost" data-rehydrate="'+b.id+'" style="flex:1">↻ Recupera foto da Drive</button></div>':'';
+    const rh='<div class="actions" style="margin:10px 0"><button class="ghost" data-rehydrate="'+b.id+'" style="flex:1">↻ Recupera foto da Drive</button></div>';
     return seg+'<div class="ogrid">'+tiles+'</div>'+rh;
   }
   const passes=[1,2,3,4].filter(p=>b.items.some(i=>i.pass===p));
@@ -857,7 +895,7 @@ document.addEventListener("click",e=>{
   else if(d.valore!==undefined) go("valore");
   else if(d.vacsv!==undefined) vaCsv();
   else if(d.gobox!==undefined){ ST.bId=d.gobox; openObject(d.obj); }
-  else if(d.rehydrate!==undefined) hydrateBox(boxById(d.rehydrate));
+  else if(d.rehydrate!==undefined) hydrateBox(boxById(d.rehydrate),true);
   else if(d.obj!==undefined) openObject(d.obj);
   else if(d.hd!==undefined) openHD(d.hd);
   else if(d.edit!==undefined){ hide("ovLight"); openItem(d.edit); }
