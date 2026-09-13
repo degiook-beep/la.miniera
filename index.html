@@ -365,7 +365,7 @@ let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.13.0 · 2026-09-13";
+const APP_VERSION="v0.14.0 · 2026-09-13";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -739,7 +739,35 @@ function openSlot(id){ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===
   const sel=document.getElementById("sBoxId");
   sel.innerHTML='<option value="">— nessuno —</option>'+DB.boxes.map(b=>'<option value="'+b.id+'"'+(s.boxId===b.id?' selected':'')+'>'+esc(b.code)+'</option>').join("");
   document.getElementById("assignNote").textContent=s.boxId?'Collegato: toccando "Apri" entri nel box.':(s.contains==="box"?'Le passate qui sono materiale grezzo: le elaboro io per creare il box catalogato collegato.':'Assegna un box catalogato per collegarlo a questo slot.');
-  show("ovSlot"); }
+  show("ovSlot"); hydrateSlot(s); }
+
+let HYDRATING_SLOT=false;
+async function hydrateSlot(s){
+  if(HYDRATING_SLOT) return;
+  const miss=[];
+  if(s.extPhotoDriveId && !s.extPhoto) miss.push({get:()=>s.extPhotoDriveId, set:(t)=>{s.extPhoto=t;}});
+  (s.passPhotos||[]).forEach(p=>{ if(p.driveId && !p.url) miss.push({get:()=>p.driveId, set:(t)=>{p.url=t;}}); });
+  (s.detailPhotos||[]).forEach(p=>{ if(p.driveId && !p.url) miss.push({get:()=>p.driveId, set:(t)=>{p.url=t;}}); });
+  if(!miss.length) return;
+  const S=window.MineraStorage;
+  if(!S||!S.isDriveReady||!S.isDriveReady()) return;
+  HYDRATING_SLOT=true;
+  const host=document.getElementById("slotPhoto");
+  const prog=document.createElement("div"); prog.className="note"; prog.style.cssText="padding:6px 0";
+  if(host) host.prepend(prog);
+  let done=0;
+  for(const m of miss){
+    if(prog) prog.textContent="Recupero foto da Drive… "+(done+1)+"/"+miss.length;
+    try{
+      const url=await S.fetchPhoto(m.get());
+      if(url){ const t=await urlToThumb(url,760,0.6); if(t) m.set(t); URL.revokeObjectURL(url); }
+    }catch(e){}
+    done++;
+  }
+  HYDRATING_SLOT=false;
+  if(!saveDB()){ alert("Foto recuperate ma memoria locale piena: alcune potrebbero non essere salvate."); }
+  if(editSlotId===s.id) openSlot(s.id);
+}
 
 function exTitle(){ if(ST.exLevel==='container'){return esc(contById(ST.exC).code);} if(ST.exLevel==='box'){return esc(boxById(ST.exB).code);} if(ST.exLevel==='layer'){return esc(boxById(ST.exB).code)+' · '+PASS_SHORT[ST.exPass];} return esc(DB.rooms[0].name)+' · esploso'; }
 function exLocale(){ return '<div class="exgrid">'+DB.containers.map((c,i)=>{ const bs=(c.slots||[]).filter(s=>s.boxable).length; return '<div class="extile" data-drill="c:'+c.id+'" style="animation-delay:'+(i*60)+'ms"><span class="et-name">'+esc(c.code)+'</span><span class="et-sub">'+esc(c.type)+' · '+c.dimW+'×'+c.dimD+' · '+bs+' slot</span></div>'; }).join('')+'</div>'; }
