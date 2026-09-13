@@ -365,7 +365,7 @@ let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.14.0 · 2026-09-13";
+const APP_VERSION="v0.15.0 · 2026-09-13";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -468,12 +468,15 @@ function vaCsv(){ const rows=allItems().map(x=>[x.path?x.path.room:'',x.path?x.p
 /* Ricostruisce le miniature mancanti scaricando da Drive i soli oggetti che
    hanno driveId ma non photo (catalogo arrivato "spoglio" dal backend). */
 let HYDRATING=false;
+function toast(msg){ const n=document.createElement("div"); n.className="note"; n.textContent=msg;
+  n.style.cssText="position:fixed;left:12px;right:12px;bottom:14px;padding:10px 12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;text-align:center;z-index:70";
+  document.body.appendChild(n); setTimeout(()=>n.remove(),4200); }
 async function hydrateBox(b){
   if(HYDRATING||!b) return;
   const miss=(b.items||[]).filter(i=>i.driveId&&!i.photo);
   if(!miss.length) return;
   const S=window.MineraStorage;
-  if(!S||!S.isDriveReady||!S.isDriveReady()) return;
+  if(!S||!S.isDriveReady||!S.isDriveReady()){ toast("Drive non connesso: impossibile recuperare le foto ora. Connetti Drive dalle Impostazioni e riapri il box."); return; }
   HYDRATING=true;
   const n=document.createElement("div"); n.className="note";
   n.style.cssText="position:fixed;left:0;right:0;bottom:0;padding:9px;background:var(--panel);border-top:1px solid var(--line);text-align:center;z-index:60";
@@ -638,8 +641,10 @@ function renderBox(b){
   });
   h+='<div class="actions"><button class="'+(b.done?"primary ghost":"primary")+'" data-done="1">'+(b.done?"Riapri":"Completa scatola")+'</button><button class="ghost" data-csv="1">CSV</button></div>';
   h+='<div class="actions" style="margin-top:10px"><label class="capbtn" style="flex:1;text-align:center"><input type="file" id="bulkIn" accept="image/*" multiple hidden>+ Carica foto in blocco (una per oggetto)</label></div>';
+  if((b.items||[]).some(i=>i.driveId&&!i.photo)) h+='<div class="actions" style="margin-top:10px"><button class="ghost" id="btnRehydrate" style="flex:1">↻ Recupera foto da Drive</button></div>';
   h+='<div class="actions" style="margin-top:10px"><button class="ghost" data-boxedit="'+b.id+'" style="flex:1">Modifica box · copertina · elimina</button></div>';
   document.getElementById("app").innerHTML=h;
+  const rh=document.getElementById("btnRehydrate"); if(rh) rh.onclick=()=>hydrateBox(b);
   const bi=document.getElementById("bulkIn");
   if(bi) bi.onchange=async(e)=>{
     const fs=Array.from(e.target.files||[]); e.target.value="";
@@ -750,7 +755,7 @@ async function hydrateSlot(s){
   (s.detailPhotos||[]).forEach(p=>{ if(p.driveId && !p.url) miss.push({get:()=>p.driveId, set:(t)=>{p.url=t;}}); });
   if(!miss.length) return;
   const S=window.MineraStorage;
-  if(!S||!S.isDriveReady||!S.isDriveReady()) return;
+  if(!S||!S.isDriveReady||!S.isDriveReady()){ toast("Drive non connesso: impossibile recuperare le foto ora. Connetti Drive dalle Impostazioni e riapri lo slot."); return; }
   HYDRATING_SLOT=true;
   const host=document.getElementById("slotPhoto");
   const prog=document.createElement("div"); prog.className="note"; prog.style.cssText="padding:6px 0";
@@ -779,7 +784,9 @@ function exBox(photo){ const b=boxById(ST.exB); const M=BOX_MEDIA[b.id]||{obj:{}
   if(ST.boxView!=="strati"){
     const tiles=b.items.map((it,i)=>{ const im=it.photo||M.obj[it.id]; const val=it.blackbox?"da aprire":(it.value!=null?eur(it.value,0):"—");
       return '<button class="otile'+(it.keep?"":" dim")+'" data-obj="'+it.id+'" style="animation-delay:'+(i*28)+'ms" title="'+esc(it.name)+" · "+val+'">'+(im?'<img src="'+im+'">':'<span class="oletter">'+esc((it.name[0]||"?").toUpperCase())+'</span>')+'<span class="ocap">'+esc(it.name)+'<em>'+val+'</em></span></button>'; }).join("");
-    return seg+'<div class="ogrid">'+tiles+'</div>';
+    const needsHydrate=(b.items||[]).some(i=>i.driveId&&!i.photo);
+    const rh=needsHydrate?'<div class="actions" style="margin:10px 0"><button class="ghost" data-rehydrate="'+b.id+'" style="flex:1">↻ Recupera foto da Drive</button></div>':'';
+    return seg+'<div class="ogrid">'+tiles+'</div>'+rh;
   }
   const passes=[1,2,3,4].filter(p=>b.items.some(i=>i.pass===p));
   return seg+'<div class="exgrid">'+passes.map((p,i)=>{ const its=b.items.filter(x=>x.pass===p); const val=its.reduce((a,x)=>a+(x.keep&&x.value!=null?x.value:0),0);
@@ -805,7 +812,7 @@ function exCrumb(){ const seg=[]; seg.push('<button data-exjump="locale">'+esc(D
   if(ST.exLevel==='layer'){ seg.push('<span class="cur">'+PASS_SHORT[ST.exPass]+'</span>'); }
   return seg.join('<span class="sep">›</span>'); }
 function exJump(level){ ST.exLevel=level; render(); }
-function drill(kind,id){ if(kind==='c'){ST.exLevel='container';ST.exC=id;} else if(kind==='b'){ST.exLevel='box';ST.exB=id;ST.bId=id;} else if(kind==='l'){ST.exLevel='layer';ST.exPass=parseInt(id,10);} render(); }
+function drill(kind,id){ if(kind==='c'){ST.exLevel='container';ST.exC=id;} else if(kind==='b'){ST.exLevel='box';ST.exB=id;ST.bId=id;} else if(kind==='l'){ST.exLevel='layer';ST.exPass=parseInt(id,10);} render(); if(kind==='b'){ hydrateBox(boxById(id)); } }
 function exBack(){ if(ST.exLevel==='layer')ST.exLevel='box'; else if(ST.exLevel==='box')ST.exLevel='container'; else if(ST.exLevel==='container')ST.exLevel='locale'; else return go('home'); render(); }
 
 function openSettings(){ const S=window.MineraStorage; const cid=(S&&S.getClientId&&S.getClientId())||''; const el=document.getElementById('setClient'); if(el) el.value=cid; const m=!S?'Locale':(S.isDriveReady()?'Drive connesso':(cid?'Drive: da connettere':(S.canShare&&S.canShare()?'Condividi disponibile':'Locale'))); const me=document.getElementById('setMode'); if(me) me.textContent=m; show('ovSet'); }
@@ -835,7 +842,7 @@ function openTrash(applyFn,reopenFn){ trashApply=applyFn||null; trashReopen=reop
 document.addEventListener("click",e=>{
   if(e.target.id==="hdImg"){ e.target.classList.toggle("zoom"); return; }
   if(e.target.classList.contains("stage")){ exBack(); return; }
-  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview],[data-room],[data-addroom],[data-newcont],[data-contedit],[data-boxedit],[data-trashpick],[data-slotkind],[data-slprm],[data-sldrm],[data-hd],[data-edit],[data-valore],[data-vacsv],[data-gobox]");
+  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview],[data-room],[data-addroom],[data-newcont],[data-contedit],[data-boxedit],[data-trashpick],[data-slotkind],[data-slprm],[data-sldrm],[data-hd],[data-edit],[data-valore],[data-vacsv],[data-gobox],[data-rehydrate]");
   if(!t){ if(e.target.classList.contains("overlay")) e.target.classList.remove("show"); return; }
   const d=t.dataset;
   if(d.nav==="home") go("home");
@@ -850,6 +857,7 @@ document.addEventListener("click",e=>{
   else if(d.valore!==undefined) go("valore");
   else if(d.vacsv!==undefined) vaCsv();
   else if(d.gobox!==undefined){ ST.bId=d.gobox; openObject(d.obj); }
+  else if(d.rehydrate!==undefined) hydrateBox(boxById(d.rehydrate));
   else if(d.obj!==undefined) openObject(d.obj);
   else if(d.hd!==undefined) openHD(d.hd);
   else if(d.edit!==undefined){ hide("ovLight"); openItem(d.edit); }
