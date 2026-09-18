@@ -274,6 +274,12 @@
   <div class="modal-a" style="margin-top:2px"><button class="ghost" id="setSaveId" style="flex:1;border:1px solid var(--brass);color:var(--brass);border-radius:11px;padding:12px;font-weight:700">Salva ID</button><button class="save" id="setConnect" style="flex:1">Connetti Drive</button></div>
   <button class="addline" id="setSync" style="margin-top:12px;border-style:solid;border-color:var(--teal);color:var(--teal-hi)">Sincronizza catalogo su Drive</button>
   <button class="addline" id="setLoad" style="margin-top:8px;border-style:solid;border-color:var(--brass);color:var(--brass)">Carica catalogo da Drive</button>
+  <div class="row" style="margin-top:14px;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--panel)">
+    <span style="font-size:12.5px;color:#8b857a">Miniature sul dispositivo</span>
+    <span id="tcCount" style="font-family:ui-monospace,Menlo,monospace;color:var(--teal-hi);font-size:12.5px">…</span>
+  </div>
+  <p class="note" style="margin-top:6px">Le miniature restano salvate su questo dispositivo e non vengono riscaricate a ogni apertura. Da Drive si preleva solo cio' che manca, e le foto in HD sempre su richiesta.</p>
+  <button class="addline" id="tcClear" style="margin-top:8px;color:#c98b7a">Svuota cache miniature</button>
   <button class="addline" id="setImportLocal" style="margin-top:8px;border-style:solid;border-color:var(--teal);color:var(--teal-hi)">Importa da file locale</button>
   <input type="file" id="setImportFile" accept="application/json" style="display:none">
   <p class="note" style="margin-top:12px">Con Client ID + Drive connesso: le foto full-res vanno sul tuo Drive (cartella "La Miniera - Inbox") con nome contestuale, e in locale resta il thumbnail. Senza, l'app resta locale. Richiede il sito in https (Vercel).</p>
@@ -369,7 +375,7 @@ let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.16.0 · 2026-09-13";
+const APP_VERSION="v0.17.0 · 2026-09-18";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -471,6 +477,62 @@ function vaCsv(){ const rows=allItems().map(x=>[x.path?x.path.room:'',x.path?x.p
 
 /* Ricostruisce le miniature mancanti scaricando da Drive i soli oggetti che
    hanno driveId ma non photo (catalogo arrivato "spoglio" dal backend). */
+/* ============ CACHE MINIATURE SUL DISPOSITIVO ============
+   Le miniature vivono qui, indicizzate per driveId, separate dal catalogo.
+   Sopravvivono a "Carica catalogo da Drive" (che azzera i base64) e alla
+   pressione di quota su localStorage. Dal server si scarica SOLO cio' che
+   non e' gia' sul dispositivo. L'HD resta sempre on-demand da Drive.        */
+const TC=(function(){
+  var dbp=null;
+  function open(){
+    if(dbp) return dbp;
+    dbp=new Promise(function(res,rej){
+      try{
+        var r=indexedDB.open("miniera-thumbs",1);
+        r.onupgradeneeded=function(){ if(!r.result.objectStoreNames.contains("t")) r.result.createObjectStore("t"); };
+        r.onsuccess=function(){ res(r.result); };
+        r.onerror=function(){ rej(r.error); };
+      }catch(e){ rej(e); }
+    });
+    return dbp;
+  }
+  function tx(mode,fn){
+    return open().then(function(db){
+      return new Promise(function(res){
+        try{ var st=db.transaction("t",mode).objectStore("t"); var rq=fn(st);
+             rq.onsuccess=function(){ res(rq.result); }; rq.onerror=function(){ res(null); };
+        }catch(e){ res(null); }
+      });
+    }).catch(function(){ return null; });
+  }
+  return {
+    get:  function(k){ return k? tx("readonly", function(st){ return st.get(k); }) : Promise.resolve(null); },
+    set:  function(k,v){ return k? tx("readwrite",function(st){ return st.put(v,k); }) : Promise.resolve(null); },
+    count:function(){ return tx("readonly", function(st){ return st.count(); }); },
+    clear:function(){ return tx("readwrite",function(st){ return st.clear(); }); }
+  };
+})();
+
+/* Riempie le miniature mancanti PESCANDO SOLO DALLA CACHE (zero rete).
+   Si chiama dopo ogni caricamento del catalogo da Drive. */
+async function fillFromCache(){
+  let n=0;
+  for(const b of (DB.boxes||[])){
+    for(const it of (b.items||[])){
+      if(it.driveId && !it.photo){ const t=await TC.get(it.driveId); if(t){ it.photo=t; n++; } }
+    }
+  }
+  for(const c of (DB.containers||[])){
+    for(const s of (c.slots||[])){
+      if(s.extPhotoDriveId && !s.extPhoto){ const t=await TC.get(s.extPhotoDriveId); if(t){ s.extPhoto=t; n++; } }
+      for(const p of (s.passPhotos||[]))   { if(p.driveId && !p.url){ const t=await TC.get(p.driveId); if(t){ p.url=t; n++; } } }
+      for(const p of (s.detailPhotos||[])) { if(p.driveId && !p.url){ const t=await TC.get(p.driveId); if(t){ p.url=t; n++; } } }
+    }
+  }
+  if(n) saveDB();
+  return n;
+}
+
 function updateDriveBar(){
   const dot=document.getElementById("driveDot"), txt=document.getElementById("driveTxt");
   if(!dot||!txt) return;
@@ -506,27 +568,40 @@ function toast(msg){ const n=document.createElement("div"); n.className="note"; 
 async function hydrateBox(b,manual){
   if(HYDRATING||!b) return;
   if(manual) HYD_FAILED.clear();
-  const miss=(b.items||[]).filter(i=>i.driveId&&!i.photo&&!HYD_FAILED.has(i.driveId));
+  let miss=(b.items||[]).filter(i=>i.driveId&&!i.photo);
   if(!miss.length){ if(manual) toast("Nessuna foto da recuperare."); return; }
-  const S=window.MineraStorage;
-  if(!S||!S.isDriveReady||!S.isDriveReady()){ toast("Drive non connesso \u2014 tocca la barra di stato in alto per connetterlo."); return; }
   HYDRATING=true;
-  const pb=progressBar("Recupero foto da Drive");
+  // 1) prima la cache del dispositivo: nessuna rete
+  let fromCache=0;
+  for(const it of miss){ const t=await TC.get(it.driveId); if(t){ it.photo=t; fromCache++; } }
+  miss=miss.filter(i=>!i.photo&&!HYD_FAILED.has(i.driveId));
+  // 2) solo cio' che manca davvero va chiesto a Drive
   let ok=0,ko=0;
-  for(let k=0;k<miss.length;k++){
-    const it=miss[k]; pb.set(k+1,miss.length);
-    let got=false;
-    try{
-      const url=await S.fetchPhoto(it.driveId);
-      if(url){ const t=await urlToThumb(url,720,0.62); if(t){ it.photo=t; got=true; } URL.revokeObjectURL(url); }
-    }catch(e){}
-    if(got) ok++; else { ko++; HYD_FAILED.add(it.driveId); }
+  if(miss.length){
+    const S=window.MineraStorage;
+    if(!S||!S.isDriveReady||!S.isDriveReady()){
+      HYDRATING=false;
+      if(fromCache){ saveDB(); render(); }
+      toast("Drive non connesso \u2014 "+miss.length+" foto non ancora sul dispositivo.");
+      return;
+    }
+    const pb=progressBar("Scarico da Drive le foto nuove");
+    for(let k=0;k<miss.length;k++){
+      const it=miss[k]; pb.set(k+1,miss.length);
+      let got=false;
+      try{
+        const url=await S.fetchPhoto(it.driveId);
+        if(url){ const t=await urlToThumb(url,720,0.62); if(t){ it.photo=t; await TC.set(it.driveId,t); got=true; } URL.revokeObjectURL(url); }
+      }catch(e){}
+      if(got) ok++; else { ko++; HYD_FAILED.add(it.driveId); }
+    }
+    pb.done();
   }
-  pb.done(); HYDRATING=false;
-  if(ok && !saveDB()) toast("Foto recuperate ma memoria locale piena.");
-  if(ko) toast(ok+" foto recuperate, "+ko+" non disponibili su Drive. Usa \u21bb per riprovare.");
-  else if(manual) toast(ok+" foto recuperate.");
-  if(ok) render();            // ridisegna SOLO se qualcosa e' cambiato: niente loop
+  HYDRATING=false;
+  if(fromCache||ok) saveDB();
+  if(ko) toast(ok+" scaricate, "+ko+" non disponibili su Drive.");
+  else if(manual) toast(fromCache+" dal dispositivo"+(ok?", "+ok+" scaricate":"")+".");
+  if(fromCache||ok) render();
 }
 function urlToThumb(url,max,q){ return new Promise(res=>{ const im=new Image(); im.onload=()=>{ const sc=Math.min(1,max/Math.max(im.width,im.height)); const cv=document.createElement("canvas"); cv.width=Math.round(im.width*sc); cv.height=Math.round(im.height*sc); cv.getContext("2d").drawImage(im,0,0,cv.width,cv.height); try{res(cv.toDataURL("image/jpeg",q));}catch(e){res(null);} }; im.onerror=()=>res(null); im.src=url; }); }
 
@@ -700,8 +775,8 @@ function renderBox(b){
         const thumb=await resizeDataURL(f,720,0.62);
         let driveId=null;
         if(drive){ try{ const nm=(bx.code+"__bulk__"+(i+1)+"__"+Date.now()+".jpg").replace(/[^A-Za-z0-9._-]+/g,"_"); const up=await MineraStorage.uploadPhoto(f,nm); if(up&&up.id) driveId=up.id; }catch(err){} }
-        if(mode==="assign" && i<senza.length){ senza[i].photo=thumb; if(driveId) senza[i].driveId=driveId; }
-        else { bx.items.push({id:"i"+Date.now()+Math.floor(Math.random()*1e4),pass:1,name:"Da identificare "+(bx.items.length+1),category:"Scatole & varie",qty:1,value:null,condition:"",tags:[],keep:true,blackbox:false,photo:thumb,driveId:driveId}); }
+        if(mode==="assign" && i<senza.length){ senza[i].photo=thumb; if(driveId){ senza[i].driveId=driveId; await TC.set(driveId,thumb); } }
+        else { bx.items.push({id:"i"+Date.now()+Math.floor(Math.random()*1e4),pass:1,name:"Da identificare "+(bx.items.length+1),category:"Scatole & varie",qty:1,value:null,condition:"",tags:[],keep:true,blackbox:false,photo:thumb,driveId:driveId}); if(driveId) await TC.set(driveId,thumb); }
         ok++;
       }catch(err){ fail++; }
       if(!saveDB()){ prog.remove(); alert("Memoria del browser piena dopo "+ok+" foto. Sincronizza su Drive e riprova."); render(); return; }
@@ -787,30 +862,40 @@ let HYDRATING_SLOT=false;
 async function hydrateSlot(s,manual){
   if(HYDRATING_SLOT) return;
   if(manual) HYD_FAILED.clear();
-  const miss=[];
-  const add=(id,setter)=>{ if(id && !HYD_FAILED.has(id)) miss.push({id:id,set:setter}); };
-  if(s.extPhotoDriveId && !s.extPhoto) add(s.extPhotoDriveId,(t)=>{s.extPhoto=t;});
-  (s.passPhotos||[]).forEach(p=>{ if(!p.url) add(p.driveId,(t)=>{p.url=t;}); });
-  (s.detailPhotos||[]).forEach(p=>{ if(!p.url) add(p.driveId,(t)=>{p.url=t;}); });
-  if(!miss.length){ if(manual) toast("Nessuna foto da recuperare."); return; }
-  const S=window.MineraStorage;
-  if(!S||!S.isDriveReady||!S.isDriveReady()){ toast("Drive non connesso \u2014 tocca la barra di stato in alto per connetterlo."); return; }
+  const targets=[];
+  if(s.extPhotoDriveId && !s.extPhoto) targets.push({id:s.extPhotoDriveId,set:(t)=>{s.extPhoto=t;}});
+  (s.passPhotos||[]).forEach(p=>{ if(p.driveId && !p.url) targets.push({id:p.driveId,set:(t)=>{p.url=t;}}); });
+  (s.detailPhotos||[]).forEach(p=>{ if(p.driveId && !p.url) targets.push({id:p.driveId,set:(t)=>{p.url=t;}}); });
+  if(!targets.length){ if(manual) toast("Nessuna foto da recuperare."); return; }
   HYDRATING_SLOT=true;
-  const pb=progressBar("Recupero foto slot da Drive");
+  let fromCache=0;
+  const still=[];
+  for(const m of targets){ const t=await TC.get(m.id); if(t){ m.set(t); fromCache++; } else if(!HYD_FAILED.has(m.id)) still.push(m); }
   let ok=0,ko=0;
-  for(let k=0;k<miss.length;k++){
-    const m=miss[k]; pb.set(k+1,miss.length);
-    let got=false;
-    try{
-      const url=await S.fetchPhoto(m.id);
-      if(url){ const t=await urlToThumb(url,760,0.6); if(t){ m.set(t); got=true; } URL.revokeObjectURL(url); }
-    }catch(e){}
-    if(got) ok++; else { ko++; HYD_FAILED.add(m.id); }
+  if(still.length){
+    const S=window.MineraStorage;
+    if(!S||!S.isDriveReady||!S.isDriveReady()){
+      HYDRATING_SLOT=false;
+      if(fromCache){ saveDB(); if(editSlotId===s.id) openSlot(s.id); }
+      toast("Drive non connesso \u2014 "+still.length+" foto non ancora sul dispositivo.");
+      return;
+    }
+    const pb=progressBar("Scarico da Drive le foto nuove");
+    for(let k=0;k<still.length;k++){
+      const m=still[k]; pb.set(k+1,still.length);
+      let got=false;
+      try{
+        const url=await S.fetchPhoto(m.id);
+        if(url){ const t=await urlToThumb(url,760,0.6); if(t){ m.set(t); await TC.set(m.id,t); got=true; } URL.revokeObjectURL(url); }
+      }catch(e){}
+      if(got) ok++; else { ko++; HYD_FAILED.add(m.id); }
+    }
+    pb.done();
   }
-  pb.done(); HYDRATING_SLOT=false;
-  if(ok) saveDB();
-  if(ko) toast(ok+" foto recuperate, "+ko+" non disponibili su Drive.");
-  if(ok && editSlotId===s.id) openSlot(s.id);
+  HYDRATING_SLOT=false;
+  if(fromCache||ok) saveDB();
+  if(ko) toast(ok+" scaricate, "+ko+" non disponibili su Drive.");
+  if((fromCache||ok) && editSlotId===s.id) openSlot(s.id);
 }
 
 function exTitle(){ if(ST.exLevel==='container'){return esc(contById(ST.exC).code);} if(ST.exLevel==='box'){return esc(boxById(ST.exB).code);} if(ST.exLevel==='layer'){return esc(boxById(ST.exB).code)+' · '+PASS_SHORT[ST.exPass];} return esc(DB.rooms[0].name)+' · esploso'; }
@@ -957,9 +1042,11 @@ document.getElementById("setSync").onclick=async()=>{
   const ok=await S.saveCatalog(DB);
   alert(ok?"Catalogo sincronizzato sul tuo Drive.":"Sync non riuscita: connetti prima Drive.");
 };
-document.getElementById("setLoad").onclick=async()=>{ const S=window.MineraStorage; if(!S||!S.loadCatalog){ alert("Modulo Drive non disponibile."); return; } let info=null; try{ info=await S.peekCatalog(); }catch(e){} if(!info){ alert("Nessun catalogo trovato su Drive, o Drive non connesso."); return; } const when=info.writtenAt?new Date(info.writtenAt).toLocaleString("it-IT"):new Date(info.modifiedTime).toLocaleString("it-IT"); if(!confirm("Catalogo trovato su Drive\n\nOrigine: "+info.origin+"\nScritto il: "+when+"\nContenuto: "+info.boxes+" box · "+info.items+" oggetti\n\nQuesto sostituisce i dati locali. Procedere?")) return; const remote=await S.loadCatalog(); if(!remote){ alert("Caricamento non riuscito."); return; } DB=remote; migrate(); hide("ovSet"); go("home"); alert("Catalogo caricato da Drive."); };
+TC.count().then(n=>{ const e=document.getElementById("tcCount"); if(e) e.textContent=(n||0)+" in cache"; });
+document.getElementById("tcClear").onclick=async()=>{ if(!confirm("Svuotare la cache delle miniature su questo dispositivo?\n\nLe foto restano su Drive e verranno riscaricate alla prossima apertura dei box.")) return; await TC.clear(); const e=document.getElementById("tcCount"); if(e) e.textContent="0 in cache"; toast("Cache svuotata."); };
+document.getElementById("setLoad").onclick=async()=>{ const S=window.MineraStorage; if(!S||!S.loadCatalog){ alert("Modulo Drive non disponibile."); return; } let info=null; try{ info=await S.peekCatalog(); }catch(e){} if(!info){ alert("Nessun catalogo trovato su Drive, o Drive non connesso."); return; } const when=info.writtenAt?new Date(info.writtenAt).toLocaleString("it-IT"):new Date(info.modifiedTime).toLocaleString("it-IT"); if(!confirm("Catalogo trovato su Drive\n\nOrigine: "+info.origin+"\nScritto il: "+when+"\nContenuto: "+info.boxes+" box · "+info.items+" oggetti\n\nQuesto sostituisce i dati locali. Procedere?")) return; const remote=await S.loadCatalog(); if(!remote){ alert("Caricamento non riuscito."); return; } DB=remote; migrate(); const nc=await fillFromCache(); hide("ovSet"); go("home"); alert("Catalogo caricato da Drive."+(nc?"\n"+nc+" miniature ripristinate dal dispositivo (nessun download).":"")); };
 document.getElementById("setImportLocal").onclick=()=>{ document.getElementById("setImportFile").click(); };
-document.getElementById("setImportFile").onchange=(ev)=>{ const file=ev.target.files&&ev.target.files[0]; if(!file) return; if(!confirm("Questo sostituisce i dati locali con quelli del file selezionato. Procedere?")){ ev.target.value=""; return; } const r=new FileReader(); r.onload=()=>{ try{ const parsed=JSON.parse(r.result); if(!parsed||!parsed.containers||!parsed.boxes){ alert("File non valido: manca containers o boxes."); return; } DB=parsed; migrate(); hide("ovSet"); go("home"); alert("Catalogo importato da file locale."); }catch(e){ alert("Errore nel leggere il file: "+e.message); } finally { ev.target.value=""; } }; r.onerror=()=>{ alert("Errore nella lettura del file."); ev.target.value=""; }; r.readAsText(file); };
+document.getElementById("setImportFile").onchange=(ev)=>{ const file=ev.target.files&&ev.target.files[0]; if(!file) return; if(!confirm("Questo sostituisce i dati locali con quelli del file selezionato. Procedere?")){ ev.target.value=""; return; } const r=new FileReader(); r.onload=()=>{ try{ const parsed=JSON.parse(r.result); if(!parsed||!parsed.containers||!parsed.boxes){ alert("File non valido: manca containers o boxes."); return; } DB=parsed; migrate(); fillFromCache().then(()=>render()); hide("ovSet"); go("home"); alert("Catalogo importato da file locale."); }catch(e){ alert("Errore nel leggere il file: "+e.message); } finally { ev.target.value=""; } }; r.onerror=()=>{ alert("Errore nella lettura del file."); ev.target.value=""; }; r.readAsText(file); };
 if(window.MineraStorage){ MineraStorage.onStatus=function(){ if(document.getElementById("ovSet").classList.contains("show")) openSettings(); }; }
 /* slot save */
 document.getElementById("sSave").onclick=()=>{ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===editSlotId); if(s){ s.name=document.getElementById("sName").value.trim()||s.name; s.type=document.getElementById("sType").value.trim(); s.occ=document.getElementById("sOcc").value.trim(); s.boxable=document.getElementById("sBoxable").checked; s.boxId=document.getElementById("sBoxId").value||null; s.w=parseInt(document.getElementById("sW").value,10)||null; s.d=parseInt(document.getElementById("sD").value,10)||null; s.h=parseInt(document.getElementById("sH").value,10)||null; } saveDB(); hide("ovSlot"); render(); };
