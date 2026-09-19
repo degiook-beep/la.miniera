@@ -375,7 +375,7 @@ let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.18.0 · 2026-09-19";
+const APP_VERSION="v0.20.0 · 2026-09-19";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -641,6 +641,75 @@ async function hydrateContainer(c){
   if(fromCache||ok){ saveDB(); render(); }
 }
 
+/* Ritaglia dalla foto funzionale del container un riquadro per ogni slot che
+   porta un campo crop {x,y,w,h} normalizzato (0-1), e lo usa come foto dello
+   slot e come copertina del box collegato. Tutto in locale: nessun download. */
+function cropFrom(src,box,maxSide,q){
+  return new Promise(res=>{
+    const im=new Image();
+    im.onload=()=>{
+      const sx=Math.round(box.x*im.width), sy=Math.round(box.y*im.height);
+      const sw=Math.round(box.w*im.width), sh=Math.round(box.h*im.height);
+      const sc=Math.min(1,maxSide/Math.max(sw,sh));
+      const cv=document.createElement("canvas");
+      cv.width=Math.max(1,Math.round(sw*sc)); cv.height=Math.max(1,Math.round(sh*sc));
+      cv.getContext("2d").drawImage(im,sx,sy,sw,sh,0,0,cv.width,cv.height);
+      try{ res(cv.toDataURL("image/jpeg",q)); }catch(e){ res(null); }
+    };
+    im.onerror=()=>res(null);
+    im.src=src;
+  });
+}
+async function generaRitagli(cid){
+  const c=contById(cid); if(!c) return;
+  const M=CONT_MEDIA[c.id]||{};
+  const src=c.funzionale||M.funzionale;
+  if(!src){ toast("Foto funzionale non disponibile: aprila una volta per scaricarla da Drive."); return; }
+  const slots=(c.slots||[]).filter(s=>s.crop);
+  if(!slots.length){ toast("Nessuno slot ha un riquadro definito."); return; }
+  const gia=slots.filter(s=>s.extPhoto).length;
+  if(gia && !confirm(gia+" slot hanno gia' una foto.\n\nOK = rigenera tutto\nAnnulla = riempi solo quelli vuoti")){
+    for(const s of slots.filter(x=>!x.extPhoto)) await ritagliaUno(src,s);
+  } else {
+    for(const s of slots) await ritagliaUno(src,s);
+  }
+  saveDB(); render(); toast("Foto degli slot generate dalla foto d'insieme.");
+}
+async function ritagliaUno(src,s){
+  const t=await cropFrom(src,s.crop,640,0.62);
+  if(!t) return;
+  s.extPhoto=t;
+  const b=s.boxId?boxById(s.boxId):null;
+  if(b && !b.cover) b.cover=t;
+}
+
+/* ============ TASTO INDIETRO DI ANDROID ============
+   Senza cronologia interna il tasto indietro esce dal sito di colpo.
+   Qui lo si fa risalire la gerarchia dell'app; solo quando non c'e'
+   piu' nulla da chiudere chiede conferma prima di uscire davvero.   */
+const OVERLAYS=["ovLight","ovItem","ovSlot","ovBox","ovSet","ovRoom","ovCont","ovNewCont","ovCsv","ovTrash","ovPlace"];
+function overlayAperto(){
+  for(const id of OVERLAYS){ const e=document.getElementById(id); if(e&&e.classList.contains("show")) return id; }
+  return null;
+}
+function guardia(){ try{ history.pushState({miniera:1},""); }catch(e){} }
+let USCITA_OK=false;
+window.addEventListener("popstate",function(){
+  if(USCITA_OK) return;              // uscita gia' autorizzata: lascia andare
+  const ov=overlayAperto();
+  if(ov){ hide(ov); guardia(); return; }                       // 1) chiudi il pannello
+  if(ST.view==="explore"){ exBack(); guardia(); return; }
+  if(ST.view==="box"){ const lk=boxLink(ST.bId); if(lk){ go("container",{cId:lk.c.id}); } else { go("home"); } guardia(); return; }
+  if(ST.view==="container"||ST.view==="valore"){ go("home"); guardia(); return; }
+  // 2) siamo in Home: chiedi conferma
+  if(confirm("Uscire da La Miniera?\n\nI dati sono gia' salvati su questo dispositivo.")){
+    USCITA_OK=true; history.back();
+  } else {
+    guardia();
+  }
+});
+guardia();
+
 function render(){
   crumb();
   if(ST.view==="explore") return renderExplore();
@@ -748,6 +817,8 @@ function renderContainer(c){
       +'<div class="sbody" data-slot="'+s.id+'"><h3 class="sname">'+esc(s.name)+'</h3><div class="stags"><span class="stype">'+esc(s.type)+(vol?' · '+vol+' L':'')+'</span><span class="sbox">'+occLine+'</span></div></div>'
       +tail+'</div>';
   });
+  if((c.slots||[]).some(s=>s.crop) && (c.funzionale||(M&&M.funzionale)))
+    h+='<button class="addline" data-gencrop="'+c.id+'" style="border-style:solid;border-color:var(--teal);color:var(--teal-hi)">\u25e7 Genera foto degli slot dalla foto funzionale</button>';
   h+='<button class="addline" data-addslot="1">+ Aggiungi slot</button>'
    +'<div class="sect">Disposizione nel locale</div><div class="place">'+esc(c.place)+'<div class="soon">Sposta il container dalla mappa in Home ("Disponi").</div></div>';
   document.getElementById("app").innerHTML=h;
@@ -999,7 +1070,7 @@ function openTrash(applyFn,reopenFn){ trashApply=applyFn||null; trashReopen=reop
 document.addEventListener("click",e=>{
   if(e.target.id==="hdImg"){ e.target.classList.toggle("zoom"); return; }
   if(e.target.classList.contains("stage")){ exBack(); return; }
-  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview],[data-room],[data-addroom],[data-newcont],[data-contedit],[data-boxedit],[data-trashpick],[data-slotkind],[data-slprm],[data-sldrm],[data-hd],[data-edit],[data-valore],[data-vacsv],[data-gobox],[data-rehydrate]");
+  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview],[data-room],[data-addroom],[data-newcont],[data-contedit],[data-boxedit],[data-trashpick],[data-slotkind],[data-slprm],[data-sldrm],[data-hd],[data-edit],[data-valore],[data-vacsv],[data-gobox],[data-rehydrate],[data-gencrop]");
   if(!t){ if(e.target.classList.contains("overlay")) e.target.classList.remove("show"); return; }
   const d=t.dataset;
   if(d.nav==="home") go("home");
@@ -1015,6 +1086,7 @@ document.addEventListener("click",e=>{
   else if(d.vacsv!==undefined) vaCsv();
   else if(d.gobox!==undefined){ ST.bId=d.gobox; openObject(d.obj); }
   else if(d.rehydrate!==undefined) hydrateBox(boxById(d.rehydrate),true);
+  else if(d.gencrop!==undefined) generaRitagli(d.gencrop);
   else if(d.obj!==undefined) openObject(d.obj);
   else if(d.hd!==undefined) openHD(d.hd);
   else if(d.edit!==undefined){ hide("ovLight"); openItem(d.edit); }
