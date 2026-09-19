@@ -112,7 +112,12 @@
       (slim.boxes || []).forEach(function (b) {
         (b.items || []).forEach(function (it) { if (it.driveId && it.photo) delete it.photo; });
       });
+      (slim.boxes || []).forEach(function (b) {
+        if (b.coverDriveId && b.cover) b.cover = null;
+      });
       (slim.containers || []).forEach(function (c) {
+        if (c.esteticoDriveId && c.estetico) c.estetico = null;
+        if (c.funzionaleDriveId && c.funzionale) c.funzionale = null;
         (c.slots || []).forEach(function (s) {
           if (s.extPhotoDriveId && s.extPhoto) s.extPhoto = null;
           (s.passPhotos || []).forEach(function (p) { if (p.driveId && p.url) p.url = null; });

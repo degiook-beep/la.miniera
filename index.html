@@ -375,7 +375,7 @@ let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.17.0 · 2026-09-18";
+const APP_VERSION="v0.18.0 · 2026-09-19";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -522,7 +522,12 @@ async function fillFromCache(){
       if(it.driveId && !it.photo){ const t=await TC.get(it.driveId); if(t){ it.photo=t; n++; } }
     }
   }
+  for(const b of (DB.boxes||[])){
+    if(b.coverDriveId && !b.cover){ const t=await TC.get(b.coverDriveId); if(t){ b.cover=t; n++; } }
+  }
   for(const c of (DB.containers||[])){
+    if(c.esteticoDriveId && !c.estetico){ const t=await TC.get(c.esteticoDriveId); if(t){ c.estetico=t; n++; } }
+    if(c.funzionaleDriveId && !c.funzionale){ const t=await TC.get(c.funzionaleDriveId); if(t){ c.funzionale=t; n++; } }
     for(const s of (c.slots||[])){
       if(s.extPhotoDriveId && !s.extPhoto){ const t=await TC.get(s.extPhotoDriveId); if(t){ s.extPhoto=t; n++; } }
       for(const p of (s.passPhotos||[]))   { if(p.driveId && !p.url){ const t=await TC.get(p.driveId); if(t){ p.url=t; n++; } } }
@@ -607,12 +612,41 @@ function urlToThumb(url,max,q){ return new Promise(res=>{ const im=new Image(); 
 
 function slotChips(c){ return (c.slots||[]).map(s=>{ if(s.px==null) return ''; const lb=s.boxId?boxById(s.boxId):null; const cls=lb?'exchip box':'exchip'; const label=lb?lb.code:(s.name.split('\u00b7').pop().trim()); const dr=lb?' data-drill="b:'+lb.id+'"':''; return '<span class="'+cls+'" style="left:'+(s.px*100)+'%;top:'+(s.py*100)+'%"'+dr+'>'+esc(label)+'</span>'; }).join(''); }
 
+let HYDRATING_CONT=false;
+async function hydrateContainer(c){
+  if(HYDRATING_CONT||!c) return;
+  const targets=[];
+  if(c.esteticoDriveId && !c.estetico)     targets.push({id:c.esteticoDriveId,   set:(t)=>{c.estetico=t;}});
+  if(c.funzionaleDriveId && !c.funzionale) targets.push({id:c.funzionaleDriveId, set:(t)=>{c.funzionale=t;}});
+  if(!targets.length) return;
+  HYDRATING_CONT=true;
+  let fromCache=0; const still=[];
+  for(const m of targets){ const t=await TC.get(m.id); if(t){ m.set(t); fromCache++; } else if(!HYD_FAILED.has(m.id)) still.push(m); }
+  let ok=0;
+  if(still.length){
+    const S=window.MineraStorage;
+    if(S&&S.isDriveReady&&S.isDriveReady()){
+      const pb=progressBar("Scarico le foto del container");
+      for(let k=0;k<still.length;k++){
+        const m=still[k]; pb.set(k+1,still.length);
+        try{ const url=await S.fetchPhoto(m.id);
+             if(url){ const t=await urlToThumb(url,1100,0.7); if(t){ m.set(t); await TC.set(m.id,t); ok++; } URL.revokeObjectURL(url); }
+             else HYD_FAILED.add(m.id);
+        }catch(e){ HYD_FAILED.add(m.id); }
+      }
+      pb.done();
+    }
+  }
+  HYDRATING_CONT=false;
+  if(fromCache||ok){ saveDB(); render(); }
+}
+
 function render(){
   crumb();
   if(ST.view==="explore") return renderExplore();
   if(ST.view==="home") return renderHome();
   if(ST.view==="valore") return renderValore();
-  if(ST.view==="container") return renderContainer(contById(ST.cId));
+  if(ST.view==="container"){ const _c=contById(ST.cId); renderContainer(_c); hydrateContainer(_c); return; }
   if(ST.view==="box"){ const _b=boxById(ST.bId); renderBox(_b); hydrateBox(_b); return; }
 }
 
