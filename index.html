@@ -354,7 +354,45 @@ const DEFAULT_DB={
 };
 const KEY="miniera:db:v2";
 function loadDB(){ try{const s=JSON.parse(localStorage.getItem(KEY)); if(s&&s.containers&&s.boxes) return s;}catch(e){} return JSON.parse(JSON.stringify(DEFAULT_DB)); }
-function saveDB(){ try{localStorage.setItem(KEY,JSON.stringify(DB)); return true;}catch(e){ return false; } }
+function saveDB(){
+  try{
+    // I ritagli generati e le copertine derivate NON vanno in localStorage:
+    // vivono nella cache IndexedDB e si rigenerano. Cosi' la quota non esplode.
+    const slim=JSON.parse(JSON.stringify(DB));
+    (slim.containers||[]).forEach(c=>(c.slots||[]).forEach(s=>{ if(s.cropGen) delete s.extPhoto; }));
+    (slim.boxes||[]).forEach(b=>{ if(b.coverGen) delete b.cover; });
+    localStorage.setItem(KEY,JSON.stringify(slim));
+    return true;
+  }catch(e){
+    try{ allarmeSpazio(e); }catch(_){}
+    return false;
+  }
+}
+let ALLARME_MOSTRATO=false;
+function allarmeSpazio(e){
+  if(ALLARME_MOSTRATO) return; ALLARME_MOSTRATO=true;
+  setTimeout(()=>{ALLARME_MOSTRATO=false;},8000);
+  const d=document.createElement("div");
+  d.style.cssText="position:fixed;left:0;right:0;top:0;z-index:95;background:#5a2b22;color:#ffd9cf;padding:12px 14px;font-size:13px;line-height:1.45;box-shadow:0 4px 18px rgba(0,0,0,.6)";
+  d.innerHTML="<b>\u26a0 Memoria del browser piena \u2014 le ultime modifiche NON sono state salvate.</b><br>"+
+              "Sincronizza su Drive adesso, poi svuota la cache miniature dalle Impostazioni."+
+              "<div style='margin-top:8px'><button id='alClose' style='padding:6px 12px;border-radius:8px;border:1px solid #ffd9cf;background:transparent;color:#ffd9cf'>Ho capito</button></div>";
+  document.body.appendChild(d);
+  const b=document.getElementById("alClose"); if(b) b.onclick=()=>d.remove();
+}
+
+/* ripristina dalla cache i ritagli generati (non salvati in localStorage) */
+async function restoreGenerated(){
+  let n=0;
+  for(const c of (DB.containers||[])) for(const s of (c.slots||[])){
+    if(s.cropGen && !s.extPhoto){ const t=await TC.get("crop:"+s.id); if(t){ s.extPhoto=t; n++; } }
+  }
+  for(const b of (DB.boxes||[])){
+    if(b.coverGen && !b.cover){ const t=await TC.get("cover:"+b.id); if(t){ b.cover=t; n++; } }
+  }
+  if(n) render();
+  return n;
+}
 function resizeDataURL(file,maxSide,q){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=ev=>{ const img=new Image(); img.onload=()=>{ let w=img.width,h=img.height; const s=Math.min(1,maxSide/Math.max(w,h)); w=Math.round(w*s); h=Math.round(h*s); const c=document.createElement('canvas'); c.width=w;c.height=h; c.getContext('2d').drawImage(img,0,0,w,h); res(c.toDataURL('image/jpeg',q)); }; img.onerror=rej; img.src=ev.target.result; }; r.onerror=rej; r.readAsDataURL(file); }); }
 async function captureTo(file,obj,field){ obj[field]=await resizeDataURL(file,760,0.62); if(window.MineraStorage && MineraStorage.isDriveReady && MineraStorage.isDriveReady()){ try{ const nm=(field+"__"+(obj.code||obj.name||"foto")+"__"+Date.now()+".jpg").replace(/[^A-Za-z0-9._-]+/g,"_"); const up=await MineraStorage.uploadPhoto(file,nm); if(up&&up.id) obj[field+"DriveId"]=up.id; }catch(e){} } saveDB(); }
 function migrate(){
@@ -375,7 +413,7 @@ let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.20.0 · 2026-09-19";
+const APP_VERSION="v0.21.0 · 2026-09-19";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -676,11 +714,11 @@ async function generaRitagli(cid){
   saveDB(); render(); toast("Foto degli slot generate dalla foto d'insieme.");
 }
 async function ritagliaUno(src,s){
-  const t=await cropFrom(src,s.crop,640,0.62);
+  const t=await cropFrom(src,s.crop,460,0.55);
   if(!t) return;
-  s.extPhoto=t;
+  s.extPhoto=t; s.cropGen=true; await TC.set("crop:"+s.id,t);
   const b=s.boxId?boxById(s.boxId):null;
-  if(b && !b.cover) b.cover=t;
+  if(b && !b.cover){ b.cover=t; b.coverGen=true; await TC.set("cover:"+b.id,t); }
 }
 
 /* ============ TASTO INDIETRO DI ANDROID ============
@@ -950,6 +988,7 @@ function openSlot(id){ const c=contById(ST.cId); const s=c.slots.find(x=>x.id===
   }
   document.getElementById("slotPhoto").innerHTML=ph;
   const ei=document.getElementById("slExtIn"); if(ei) ei.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; await captureTo(f,s,'extPhoto'); openSlot(id); };
+  const eIn=document.getElementById("slExtIn"); if(eIn){ const prev=eIn.onchange; eIn.onchange=async(ev)=>{ delete s.cropGen; if(prev) await prev(ev); }; }
   const erm=document.getElementById("slExtRm"); if(erm) erm.onclick=()=>{ if(s.extPhoto){ DB.photoTrash=DB.photoTrash||[]; DB.photoTrash.push({id:'t'+Date.now(),url:s.extPhoto,label:s.name+' · esterna'}); } delete s.extPhoto; delete s.extPhotoDriveId; saveDB(); openSlot(id); };
   const pi=document.getElementById("slPassIn"); if(pi) pi.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; s.passPhotos=s.passPhotos||[]; const url=await resizeDataURL(f,760,0.6); let driveId=null; if(window.MineraStorage&&MineraStorage.isDriveReady&&MineraStorage.isDriveReady()){ try{ const nm=(c.code+"__"+s.name+"__P"+(s.passPhotos.length+1)+"__"+Date.now()+".jpg").replace(/[^A-Za-z0-9._-]+/g,"_"); const up=await MineraStorage.uploadPhoto(f,nm); if(up&&up.id) driveId=up.id; }catch(err){} } s.passPhotos.push({id:'pp'+Date.now(),url:url,driveId:driveId}); saveDB(); openSlot(id); };
   const di=document.getElementById("slDetIn"); if(di) di.onchange=async(e)=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; s.detailPhotos=s.detailPhotos||[]; const url=await resizeDataURL(f,760,0.62); let nm=null; try{ nm=prompt("Nome del pezzo (facoltativo — lascialo vuoto e ci penso io):",""); }catch(e2){} if(nm) nm=nm.trim(); let driveId=null; if(window.MineraStorage&&MineraStorage.isDriveReady&&MineraStorage.isDriveReady()){ try{ const fn=(c.code+"__"+s.name+"__dett_"+(nm||("d"+(s.detailPhotos.length+1)))+"__"+Date.now()+".jpg").replace(/[^A-Za-z0-9._-]+/g,"_"); const up=await MineraStorage.uploadPhoto(f,fn); if(up&&up.id) driveId=up.id; }catch(err){} } s.detailPhotos.push({id:'d'+Date.now(),url:url,driveId:driveId,name:nm||""}); saveDB(); openSlot(id); };
@@ -1005,8 +1044,8 @@ async function hydrateSlot(s,manual){
 
 function exTitle(){ if(ST.exLevel==='container'){return esc(contById(ST.exC).code);} if(ST.exLevel==='box'){return esc(boxById(ST.exB).code);} if(ST.exLevel==='layer'){return esc(boxById(ST.exB).code)+' · '+PASS_SHORT[ST.exPass];} return esc(DB.rooms[0].name)+' · esploso'; }
 function exLocale(){ return '<div class="exgrid">'+DB.containers.map((c,i)=>{ const bs=(c.slots||[]).filter(s=>s.boxable).length; return '<div class="extile" data-drill="c:'+c.id+'" style="animation-delay:'+(i*60)+'ms"><span class="et-name">'+esc(c.code)+'</span><span class="et-sub">'+esc(c.type)+' · '+c.dimW+'×'+c.dimD+' · '+bs+' slot</span></div>'; }).join('')+'</div>'; }
-function exContainer(photo){ const c=contById(ST.exC); const M=CONT_MEDIA[c.id]||{};
-  if(photo&&M.funzionale){ const chips=(c.slots||[]).map(s=>{ if(s.px==null) return ''; const lb=s.boxId?boxById(s.boxId):null; const cls=lb?'exchip box':'exchip'; const label=lb?lb.code:(s.name.split('·').pop().trim()); const dr=lb?' data-drill="b:'+lb.id+'"':''; return '<span class="'+cls+'" style="left:'+(s.px*100)+'%;top:'+(s.py*100)+'%"'+dr+'>'+esc(label)+'</span>'; }).join(''); return '<div class="exphoto"><img src="'+M.funzionale+'">'+chips+'</div>'; }
+function exContainer(photo){ const c=contById(ST.exC); const M=CONT_MEDIA[c.id]||{}; const fun=c.funzionale||M.funzionale;
+  if(photo&&fun){ const chips=(c.slots||[]).map(s=>{ if(s.px==null) return ''; const lb=s.boxId?boxById(s.boxId):null; const cls=lb?'exchip box':'exchip'; const label=lb?lb.code:(s.name.split('·').pop().trim()); const dr=lb?' data-drill="b:'+lb.id+'"':''; return '<span class="'+cls+'" style="left:'+(s.px*100)+'%;top:'+(s.py*100)+'%"'+dr+'>'+esc(label)+'</span>'; }).join(''); return '<div class="exphoto"><img src="'+fun+'">'+chips+'</div>'; }
   return '<div class="exgrid">'+(c.slots||[]).map((s,i)=>{ const lb=s.boxId?boxById(s.boxId):null; const vol=slotVol(s); const cls='extile'+(lb?' box':'')+(s.boxable?'':' dim'); const dr=lb?' data-drill="b:'+lb.id+'"':''; return '<div class="'+cls+'"'+dr+' style="animation-delay:'+(i*50)+'ms">'+(lb?'<span class="et-badge">box</span>':'')+'<span class="et-name">'+esc(lb?lb.code:s.name)+'</span><span class="et-sub">'+esc(s.type)+(vol?' · '+vol+' L':'')+(lb?'':(s.boxable?' · '+esc(s.occ||'libero'):' · no box'))+'</span></div>'; }).join('')+'</div>'; }
 function exBox(photo){ const b=boxById(ST.exB); const M=BOX_MEDIA[b.id]||{obj:{},hd:{}};
   const seg='<div class="boxseg"><button class="'+(ST.boxView!=="strati"?"on":"")+'" data-boxview="obj">Oggetti</button><button class="'+(ST.boxView==="strati"?"on":"")+'" data-boxview="strati">Strati</button></div>';
@@ -1150,7 +1189,7 @@ document.getElementById("setSync").onclick=async()=>{
 };
 TC.count().then(n=>{ const e=document.getElementById("tcCount"); if(e) e.textContent=(n||0)+" in cache"; });
 document.getElementById("tcClear").onclick=async()=>{ if(!confirm("Svuotare la cache delle miniature su questo dispositivo?\n\nLe foto restano su Drive e verranno riscaricate alla prossima apertura dei box.")) return; await TC.clear(); const e=document.getElementById("tcCount"); if(e) e.textContent="0 in cache"; toast("Cache svuotata."); };
-document.getElementById("setLoad").onclick=async()=>{ const S=window.MineraStorage; if(!S||!S.loadCatalog){ alert("Modulo Drive non disponibile."); return; } let info=null; try{ info=await S.peekCatalog(); }catch(e){} if(!info){ alert("Nessun catalogo trovato su Drive, o Drive non connesso."); return; } const when=info.writtenAt?new Date(info.writtenAt).toLocaleString("it-IT"):new Date(info.modifiedTime).toLocaleString("it-IT"); if(!confirm("Catalogo trovato su Drive\n\nOrigine: "+info.origin+"\nScritto il: "+when+"\nContenuto: "+info.boxes+" box · "+info.items+" oggetti\n\nQuesto sostituisce i dati locali. Procedere?")) return; const remote=await S.loadCatalog(); if(!remote){ alert("Caricamento non riuscito."); return; } DB=remote; migrate(); const nc=await fillFromCache(); hide("ovSet"); go("home"); alert("Catalogo caricato da Drive."+(nc?"\n"+nc+" miniature ripristinate dal dispositivo (nessun download).":"")); };
+document.getElementById("setLoad").onclick=async()=>{ const S=window.MineraStorage; if(!S||!S.loadCatalog){ alert("Modulo Drive non disponibile."); return; } let info=null; try{ info=await S.peekCatalog(); }catch(e){} if(!info){ alert("Nessun catalogo trovato su Drive, o Drive non connesso."); return; } const when=info.writtenAt?new Date(info.writtenAt).toLocaleString("it-IT"):new Date(info.modifiedTime).toLocaleString("it-IT"); if(!confirm("Catalogo trovato su Drive\n\nOrigine: "+info.origin+"\nScritto il: "+when+"\nContenuto: "+info.boxes+" box · "+info.items+" oggetti\n\nQuesto sostituisce i dati locali. Procedere?")) return; const remote=await S.loadCatalog(); if(!remote){ alert("Caricamento non riuscito."); return; } DB=remote; migrate(); const nc=await fillFromCache(); await restoreGenerated(); hide("ovSet"); go("home"); alert("Catalogo caricato da Drive."+(nc?"\n"+nc+" miniature ripristinate dal dispositivo (nessun download).":"")); };
 document.getElementById("setImportLocal").onclick=()=>{ document.getElementById("setImportFile").click(); };
 document.getElementById("setImportFile").onchange=(ev)=>{ const file=ev.target.files&&ev.target.files[0]; if(!file) return; if(!confirm("Questo sostituisce i dati locali con quelli del file selezionato. Procedere?")){ ev.target.value=""; return; } const r=new FileReader(); r.onload=()=>{ try{ const parsed=JSON.parse(r.result); if(!parsed||!parsed.containers||!parsed.boxes){ alert("File non valido: manca containers o boxes."); return; } DB=parsed; migrate(); fillFromCache().then(()=>render()); hide("ovSet"); go("home"); alert("Catalogo importato da file locale."); }catch(e){ alert("Errore nel leggere il file: "+e.message); } finally { ev.target.value=""; } }; r.onerror=()=>{ alert("Errore nella lettura del file."); ev.target.value=""; }; r.readAsText(file); };
 if(window.MineraStorage){ MineraStorage.onStatus=function(){ if(document.getElementById("ovSet").classList.contains("show")) openSettings(); }; }
@@ -1168,6 +1207,8 @@ document.getElementById("csvDownload").onclick=()=>{ const b=new Blob([document.
 
 var _v=document.getElementById("appver"); if(_v) _v.textContent=APP_VERSION;
 render();
+restoreGenerated();   // rimette i ritagli dalla cache del dispositivo
+updateDriveBar();
 </script>
 </body>
 </html>

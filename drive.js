@@ -114,12 +114,14 @@
       });
       (slim.boxes || []).forEach(function (b) {
         if (b.coverDriveId && b.cover) b.cover = null;
+        if (b.coverGen && b.cover) b.cover = null;   // copertina ritagliata: si rigenera
       });
       (slim.containers || []).forEach(function (c) {
         if (c.esteticoDriveId && c.estetico) c.estetico = null;
         if (c.funzionaleDriveId && c.funzionale) c.funzionale = null;
         (c.slots || []).forEach(function (s) {
           if (s.extPhotoDriveId && s.extPhoto) s.extPhoto = null;
+          if (s.cropGen && s.extPhoto) s.extPhoto = null;   // ritaglio: si rigenera dal crop
           (s.passPhotos || []).forEach(function (p) { if (p.driveId && p.url) p.url = null; });
           (s.detailPhotos || []).forEach(function (p) { if (p.driveId && p.url) p.url = null; });
         });
