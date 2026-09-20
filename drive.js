@@ -192,7 +192,10 @@
             var m = obj._meta || {};
             var boxes = (obj.boxes || []).length;
             var items = (obj.boxes || []).reduce(function (a, b) { return a + ((b.items || []).length); }, 0);
-            return { id: f.id, modifiedTime: f.modifiedTime, origin: m.origin || 'sconosciuta', writtenAt: m.writtenAt || null, boxes: boxes, items: items };
+            var conts = (obj.containers || []).length;
+            var names = (obj.containers || []).map(function (c) { return c.code; });
+            return { id: f.id, modifiedTime: f.modifiedTime, origin: m.origin || 'sconosciuta', writtenAt: m.writtenAt || null,
+                     boxes: boxes, items: items, conts: conts, names: names };
           });
       })
       .catch(function () { return null; });
