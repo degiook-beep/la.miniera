@@ -413,7 +413,7 @@ let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.21.0 · 2026-09-19";
+const APP_VERSION="v0.22.0 · 2026-09-19";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -1042,8 +1042,11 @@ async function hydrateSlot(s,manual){
   if((fromCache||ok) && editSlotId===s.id) openSlot(s.id);
 }
 
-function exTitle(){ if(ST.exLevel==='container'){return esc(contById(ST.exC).code);} if(ST.exLevel==='box'){return esc(boxById(ST.exB).code);} if(ST.exLevel==='layer'){return esc(boxById(ST.exB).code)+' · '+PASS_SHORT[ST.exPass];} return esc(DB.rooms[0].name)+' · esploso'; }
-function exLocale(){ return '<div class="exgrid">'+DB.containers.map((c,i)=>{ const bs=(c.slots||[]).filter(s=>s.boxable).length; return '<div class="extile" data-drill="c:'+c.id+'" style="animation-delay:'+(i*60)+'ms"><span class="et-name">'+esc(c.code)+'</span><span class="et-sub">'+esc(c.type)+' · '+c.dimW+'×'+c.dimD+' · '+bs+' slot</span></div>'; }).join('')+'</div>'; }
+function exRoom(){ const c=ST.exC?contById(ST.exC):null;
+  const rid=c?(c.roomId||(DB.rooms[0]&&DB.rooms[0].id)):ST.roomId;
+  return (DB.rooms||[]).find(r=>r.id===rid)||curRoom(); }
+function exTitle(){ if(ST.exLevel==='container'){return esc(contById(ST.exC).code);} if(ST.exLevel==='box'){return esc(boxById(ST.exB).code);} if(ST.exLevel==='layer'){return esc(boxById(ST.exB).code)+' · '+PASS_SHORT[ST.exPass];} return esc(exRoom().name)+' · esploso'; }
+function exLocale(){ const rid=(exRoom()||{}).id; return '<div class="exgrid">'+DB.containers.filter(c=>(c.roomId||(DB.rooms[0]&&DB.rooms[0].id))===rid).map((c,i)=>{ const bs=(c.slots||[]).filter(s=>s.boxable).length; return '<div class="extile" data-drill="c:'+c.id+'" style="animation-delay:'+(i*60)+'ms"><span class="et-name">'+esc(c.code)+'</span><span class="et-sub">'+esc(c.type)+' · '+c.dimW+'×'+c.dimD+' · '+bs+' slot</span></div>'; }).join('')+'</div>'; }
 function exContainer(photo){ const c=contById(ST.exC); const M=CONT_MEDIA[c.id]||{}; const fun=c.funzionale||M.funzionale;
   if(photo&&fun){ const chips=(c.slots||[]).map(s=>{ if(s.px==null) return ''; const lb=s.boxId?boxById(s.boxId):null; const cls=lb?'exchip box':'exchip'; const label=lb?lb.code:(s.name.split('·').pop().trim()); const dr=lb?' data-drill="b:'+lb.id+'"':''; return '<span class="'+cls+'" style="left:'+(s.px*100)+'%;top:'+(s.py*100)+'%"'+dr+'>'+esc(label)+'</span>'; }).join(''); return '<div class="exphoto"><img src="'+fun+'">'+chips+'</div>'; }
   return '<div class="exgrid">'+(c.slots||[]).map((s,i)=>{ const lb=s.boxId?boxById(s.boxId):null; const vol=slotVol(s); const cls='extile'+(lb?' box':'')+(s.boxable?'':' dim'); const dr=lb?' data-drill="b:'+lb.id+'"':''; return '<div class="'+cls+'"'+dr+' style="animation-delay:'+(i*50)+'ms">'+(lb?'<span class="et-badge">box</span>':'')+'<span class="et-name">'+esc(lb?lb.code:s.name)+'</span><span class="et-sub">'+esc(s.type)+(vol?' · '+vol+' L':'')+(lb?'':(s.boxable?' · '+esc(s.occ||'libero'):' · no box'))+'</span></div>'; }).join('')+'</div>'; }
@@ -1073,13 +1076,13 @@ function renderExplore(){ const photo=ST.exPhoto; let body;
   const hint=ST.exLevel==='locale'?'tocca un container per esploderlo':(ST.exLevel==='box'?(ST.boxView!=='strati'?'tutti gli oggetti del box · passa il mouse per la descrizione, tocca per la foto HD':'tocca uno strato per rovistare gli oggetti'):(ST.exLevel==='layer'?'tocca un oggetto per i dettagli':'tocca un box'));
   document.getElementById("app").innerHTML=bar+'<div class="stage">'+body+'<div class="exhint">'+hint+' · tocca lo sfondo per salire</div></div>';
 }
-function exCrumb(){ const seg=[]; seg.push('<button data-exjump="locale">'+esc(DB.rooms[0].name)+'</button>');
+function exCrumb(){ const seg=[]; seg.push('<button data-exjump="locale">'+esc(exRoom().name)+'</button>');
   if(ST.exLevel!=='locale'){ const c=contById(ST.exC); seg.push(ST.exLevel==='container'?'<span class="cur">'+esc(c.code)+'</span>':'<button data-exjump="container">'+esc(c.code)+'</button>'); }
   if(ST.exLevel==='box'||ST.exLevel==='layer'){ const b=boxById(ST.exB); seg.push(ST.exLevel==='box'?'<span class="cur">'+esc(b.code)+'</span>':'<button data-exjump="box">'+esc(b.code)+'</button>'); }
   if(ST.exLevel==='layer'){ seg.push('<span class="cur">'+PASS_SHORT[ST.exPass]+'</span>'); }
   return seg.join('<span class="sep">›</span>'); }
 function exJump(level){ ST.exLevel=level; render(); }
-function drill(kind,id){ if(kind==='c'){ST.exLevel='container';ST.exC=id;} else if(kind==='b'){ST.exLevel='box';ST.exB=id;ST.bId=id;} else if(kind==='l'){ST.exLevel='layer';ST.exPass=parseInt(id,10);} render(); if(kind==='b'){ hydrateBox(boxById(id)); } }
+function drill(kind,id){ if(kind==='c'){ST.exLevel='container';ST.exC=id; const _c=contById(id); if(_c&&_c.roomId) ST.roomId=_c.roomId;} else if(kind==='b'){ST.exLevel='box';ST.exB=id;ST.bId=id;} else if(kind==='l'){ST.exLevel='layer';ST.exPass=parseInt(id,10);} render(); if(kind==='b'){ hydrateBox(boxById(id)); } }
 function exBack(){ if(ST.exLevel==='layer')ST.exLevel='box'; else if(ST.exLevel==='box')ST.exLevel='container'; else if(ST.exLevel==='container')ST.exLevel='locale'; else return go('home'); render(); }
 
 function openSettings(){ const S=window.MineraStorage; const cid=(S&&S.getClientId&&S.getClientId())||''; const el=document.getElementById('setClient'); if(el) el.value=cid; const m=!S?'Locale':(S.isDriveReady()?'Drive connesso':(cid?'Drive: da connettere':(S.canShare&&S.canShare()?'Condividi disponibile':'Locale'))); const me=document.getElementById('setMode'); if(me) me.textContent=m; show('ovSet'); }
