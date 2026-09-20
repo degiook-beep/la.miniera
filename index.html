@@ -413,7 +413,7 @@ let DB=loadDB(); migrate();
 let ST={view:"home",cId:null,bId:null,ptab:"est",boxView:"obj",roomId:(DB.rooms[0]&&DB.rooms[0].id)};
 let editSlotId=null, editItemId=null, editPlaceId=null;
 let planEdit=false;
-const APP_VERSION="v0.22.0 · 2026-09-19";
+const APP_VERSION="v0.24.0 · 2026-09-20";
 const slotVol=s=>(s.w&&s.d&&s.h)?Math.round(s.w*s.d*s.h/1000):0;
 const usableVol=c=>(c.slots||[]).filter(s=>s.boxable).reduce((a,s)=>a+slotVol(s),0);
 const eur=(n,d=2)=>new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR",minimumFractionDigits:d,maximumFractionDigits:d}).format(n||0);
@@ -892,6 +892,9 @@ function renderBox(b){
     });
   });
   h+='<div class="actions"><button class="'+(b.done?"primary ghost":"primary")+'" data-done="1">'+(b.done?"Riapri":"Completa scatola")+'</button><button class="ghost" data-csv="1">CSV</button></div>';
+  const _lk=boxLink(b.id);
+  if(_lk) h+='<div class="actions" style="margin-top:12px"><button class="ghost" data-goslot="'+_lk.c.id+'|'+_lk.s.id+'" style="flex:1;border-style:solid;border-color:var(--teal);color:var(--teal-hi);font-weight:700">\u2197 Apri lo slot \u2014 passate e dettagli</button></div>'
+       +'<p class="note" style="margin-top:6px">Le passate (svuotamento a strati) e le foto di dettaglio si aggiungono nello slot che ospita il box: da l\u00ec le elaboro io e produco l\u0027elenco oggetti.</p>';
   h+='<div class="actions" style="margin-top:10px"><label class="capbtn" style="flex:1;text-align:center"><input type="file" id="bulkIn" accept="image/*" multiple hidden>+ Carica foto in blocco (una per oggetto)</label></div>';
   h+='<div class="actions" style="margin-top:10px"><button class="ghost" id="btnRehydrate" style="flex:1">↻ Recupera foto da Drive</button></div>';
   h+='<div class="actions" style="margin-top:10px"><button class="ghost" data-boxedit="'+b.id+'" style="flex:1">Modifica box · copertina · elimina</button></div>';
@@ -1045,8 +1048,27 @@ async function hydrateSlot(s,manual){
 function exRoom(){ const c=ST.exC?contById(ST.exC):null;
   const rid=c?(c.roomId||(DB.rooms[0]&&DB.rooms[0].id)):ST.roomId;
   return (DB.rooms||[]).find(r=>r.id===rid)||curRoom(); }
-function exTitle(){ if(ST.exLevel==='container'){return esc(contById(ST.exC).code);} if(ST.exLevel==='box'){return esc(boxById(ST.exB).code);} if(ST.exLevel==='layer'){return esc(boxById(ST.exB).code)+' · '+PASS_SHORT[ST.exPass];} return esc(exRoom().name)+' · esploso'; }
-function exLocale(){ const rid=(exRoom()||{}).id; return '<div class="exgrid">'+DB.containers.filter(c=>(c.roomId||(DB.rooms[0]&&DB.rooms[0].id))===rid).map((c,i)=>{ const bs=(c.slots||[]).filter(s=>s.boxable).length; return '<div class="extile" data-drill="c:'+c.id+'" style="animation-delay:'+(i*60)+'ms"><span class="et-name">'+esc(c.code)+'</span><span class="et-sub">'+esc(c.type)+' · '+c.dimW+'×'+c.dimD+' · '+bs+' slot</span></div>'; }).join('')+'</div>'; }
+function exTitle(){ if(ST.exLevel==='container'){return esc(contById(ST.exC).code);} if(ST.exLevel==='box'){return esc(boxById(ST.exB).code);} if(ST.exLevel==='layer'){return esc(boxById(ST.exB).code)+' · '+PASS_SHORT[ST.exPass];} return 'La Miniera · esploso'; }
+function exLocale(){
+  // TUTTE le stanze, raggruppate: nessun container deve restare irraggiungibile
+  const rooms=DB.rooms||[];
+  const dflt=rooms[0]&&rooms[0].id;
+  let out='';
+  rooms.forEach(r=>{
+    const cs=(DB.containers||[]).filter(c=>(c.roomId||dflt)===r.id);
+    if(!cs.length) return;
+    out+='<div class="sect" style="margin:6px 0 8px">'+esc(r.name)+'</div><div class="exgrid">'+
+      cs.map((c,i)=>{ const bs=(c.slots||[]).filter(s=>s.boxable).length;
+        return '<div class="extile" data-drill="c:'+c.id+'" style="animation-delay:'+(i*60)+'ms"><span class="et-name">'+esc(c.code)+'</span><span class="et-sub">'+esc(c.type)+' · '+c.dimW+'×'+c.dimD+' · '+bs+' slot</span></div>';
+      }).join('')+'</div>';
+  });
+  const orfani=(DB.containers||[]).filter(c=>!rooms.some(r=>r.id===(c.roomId||dflt)));
+  if(orfani.length){
+    out+='<div class="sect" style="margin:6px 0 8px">Senza stanza</div><div class="exgrid">'+
+      orfani.map(c=>'<div class="extile" data-drill="c:'+c.id+'"><span class="et-name">'+esc(c.code)+'</span><span class="et-sub">'+esc(c.type)+'</span></div>').join('')+'</div>';
+  }
+  return out||'<div class="place">Nessun container.</div>';
+}
 function exContainer(photo){ const c=contById(ST.exC); const M=CONT_MEDIA[c.id]||{}; const fun=c.funzionale||M.funzionale;
   if(photo&&fun){ const chips=(c.slots||[]).map(s=>{ if(s.px==null) return ''; const lb=s.boxId?boxById(s.boxId):null; const cls=lb?'exchip box':'exchip'; const label=lb?lb.code:(s.name.split('·').pop().trim()); const dr=lb?' data-drill="b:'+lb.id+'"':''; return '<span class="'+cls+'" style="left:'+(s.px*100)+'%;top:'+(s.py*100)+'%"'+dr+'>'+esc(label)+'</span>'; }).join(''); return '<div class="exphoto"><img src="'+fun+'">'+chips+'</div>'; }
   return '<div class="exgrid">'+(c.slots||[]).map((s,i)=>{ const lb=s.boxId?boxById(s.boxId):null; const vol=slotVol(s); const cls='extile'+(lb?' box':'')+(s.boxable?'':' dim'); const dr=lb?' data-drill="b:'+lb.id+'"':''; return '<div class="'+cls+'"'+dr+' style="animation-delay:'+(i*50)+'ms">'+(lb?'<span class="et-badge">box</span>':'')+'<span class="et-name">'+esc(lb?lb.code:s.name)+'</span><span class="et-sub">'+esc(s.type)+(vol?' · '+vol+' L':'')+(lb?'':(s.boxable?' · '+esc(s.occ||'libero'):' · no box'))+'</span></div>'; }).join('')+'</div>'; }
@@ -1076,7 +1098,8 @@ function renderExplore(){ const photo=ST.exPhoto; let body;
   const hint=ST.exLevel==='locale'?'tocca un container per esploderlo':(ST.exLevel==='box'?(ST.boxView!=='strati'?'tutti gli oggetti del box · passa il mouse per la descrizione, tocca per la foto HD':'tocca uno strato per rovistare gli oggetti'):(ST.exLevel==='layer'?'tocca un oggetto per i dettagli':'tocca un box'));
   document.getElementById("app").innerHTML=bar+'<div class="stage">'+body+'<div class="exhint">'+hint+' · tocca lo sfondo per salire</div></div>';
 }
-function exCrumb(){ const seg=[]; seg.push('<button data-exjump="locale">'+esc(exRoom().name)+'</button>');
+function exCrumb(){ const seg=[]; seg.push('<button data-exjump="locale">La Miniera</button>');
+  if(ST.exLevel!=='locale'){ const _r=exRoom(); if(_r) seg.push('<span class="cur" style="opacity:.75">'+esc(_r.name)+'</span>'); }
   if(ST.exLevel!=='locale'){ const c=contById(ST.exC); seg.push(ST.exLevel==='container'?'<span class="cur">'+esc(c.code)+'</span>':'<button data-exjump="container">'+esc(c.code)+'</button>'); }
   if(ST.exLevel==='box'||ST.exLevel==='layer'){ const b=boxById(ST.exB); seg.push(ST.exLevel==='box'?'<span class="cur">'+esc(b.code)+'</span>':'<button data-exjump="box">'+esc(b.code)+'</button>'); }
   if(ST.exLevel==='layer'){ seg.push('<span class="cur">'+PASS_SHORT[ST.exPass]+'</span>'); }
@@ -1112,7 +1135,7 @@ function openTrash(applyFn,reopenFn){ trashApply=applyFn||null; trashReopen=reop
 document.addEventListener("click",e=>{
   if(e.target.id==="hdImg"){ e.target.classList.toggle("zoom"); return; }
   if(e.target.classList.contains("stage")){ exBack(); return; }
-  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview],[data-room],[data-addroom],[data-newcont],[data-contedit],[data-boxedit],[data-trashpick],[data-slotkind],[data-slprm],[data-sldrm],[data-hd],[data-edit],[data-valore],[data-vacsv],[data-gobox],[data-rehydrate],[data-gencrop]");
+  const t=e.target.closest("[data-nav],[data-open-c],[data-open-b],[data-slot],[data-addslot],[data-ptab],[data-cphoto],[data-pass],[data-obj],[data-item],[data-keep],[data-done],[data-csv],[data-close],[data-roomedit],[data-planedit],[data-explore],[data-drill],[data-exback],[data-extoggle],[data-explist],[data-exobj],[data-exjump],[data-settings],[data-boxview],[data-room],[data-addroom],[data-newcont],[data-contedit],[data-boxedit],[data-trashpick],[data-slotkind],[data-slprm],[data-sldrm],[data-hd],[data-edit],[data-valore],[data-vacsv],[data-gobox],[data-rehydrate],[data-gencrop],[data-goslot]");
   if(!t){ if(e.target.classList.contains("overlay")) e.target.classList.remove("show"); return; }
   const d=t.dataset;
   if(d.nav==="home") go("home");
@@ -1129,6 +1152,7 @@ document.addEventListener("click",e=>{
   else if(d.gobox!==undefined){ ST.bId=d.gobox; openObject(d.obj); }
   else if(d.rehydrate!==undefined) hydrateBox(boxById(d.rehydrate),true);
   else if(d.gencrop!==undefined) generaRitagli(d.gencrop);
+  else if(d.goslot!==undefined){ const pz=d.goslot.split("|"); go("container",{cId:pz[0]}); setTimeout(()=>openSlot(pz[1]),60); }
   else if(d.obj!==undefined) openObject(d.obj);
   else if(d.hd!==undefined) openHD(d.hd);
   else if(d.edit!==undefined){ hide("ovLight"); openItem(d.edit); }
@@ -1187,8 +1211,17 @@ document.getElementById("setSync").onclick=async()=>{
     if(proceed){ const r=await S.loadCatalog(); if(r){ DB=r; migrate(); hide("ovSet"); go("home"); alert("Catalogo caricato da Drive."); } else alert("Caricamento non riuscito."); return; }
     if(!confirm("Confermi di voler SOVRASCRIVERE il catalogo su Drive con i dati locali?\n\nIl lavoro di catalogazione esterno andrà perso.")) return;
   }
+  const locCont=(DB.containers||[]).length;
   const ok=await S.saveCatalog(DB);
-  alert(ok?"Catalogo sincronizzato sul tuo Drive.":"Sync non riuscita: connetti prima Drive.");
+  if(!ok){ alert("SINCRONIZZAZIONE NON RIUSCITA.\n\n"+(S.lastError||"Drive non raggiungibile.")+"\n\nI dati locali NON sono stati salvati sul backend."); return; }
+  // verifica reale: rileggo da Drive e confronto
+  let check=null; try{ check=await S.peekCatalog(); }catch(e){}
+  if(!check){ alert("Scrittura inviata ma non verificabile: ricontrolla la connessione a Drive."); return; }
+  if(check.origin!=="app"){
+    alert("ATTENZIONE: su Drive risulta ancora il catalogo di origine \""+check.origin+"\".\n\nLa scrittura non ha avuto effetto. Riprova dopo aver premuto Connetti Drive.");
+    return;
+  }
+  alert("Catalogo sincronizzato e verificato sul tuo Drive.\n\n"+locCont+" container · "+locBoxes+" box · "+locItems+" oggetti.");
 };
 TC.count().then(n=>{ const e=document.getElementById("tcCount"); if(e) e.textContent=(n||0)+" in cache"; });
 document.getElementById("tcClear").onclick=async()=>{ if(!confirm("Svuotare la cache delle miniature su questo dispositivo?\n\nLe foto restano su Drive e verranno riscaricate alla prossima apertura dei box.")) return; await TC.clear(); const e=document.getElementById("tcCount"); if(e) e.textContent="0 in cache"; toast("Cache svuotata."); };

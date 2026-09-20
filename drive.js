@@ -129,18 +129,32 @@
       (slim.photoTrash || []).forEach(function (p) { if (p.url) p.url = null; });
     } catch (e) { slim = obj; }
     var content = new Blob([JSON.stringify(slim)], { type: 'application/json' });
-    function createNew() {
-      var meta = { name: 'la-miniera-catalog.json', parents: inboxId ? [inboxId] : undefined };
+    function createNew(parentId) {
+      var meta = { name: 'la-miniera-catalog.json' };
+      if (parentId) meta.parents = [parentId];
       var form = new FormData();
       form.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
       form.append('file', content);
       return api('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', { method: 'POST', body: form })
-        .then(function (r) { return r.json(); }).then(function (j2) { catalogId = j2.id; return true; });
+        .then(function (r) {
+          return r.text().then(function (t) {
+            if (!r.ok) {
+              // Se la cartella Inbox non e' scrivibile dall'app, riprova nella radice
+              if (parentId) return createNew(null);
+              throw new Error('creazione non riuscita (HTTP ' + r.status + '): ' + t.slice(0, 200));
+            }
+            var j2 = {};
+            try { j2 = JSON.parse(t); } catch (e) {}
+            if (!j2.id) throw new Error('creazione senza id: ' + t.slice(0, 200));
+            catalogId = j2.id;
+            return true;
+          });
+        });
     }
     function patch(id) {
       return api('https://www.googleapis.com/upload/drive/v3/files/' + id + '?uploadType=media', { method: 'PATCH', body: content })
-        .then(function (r) { if (!r.ok) { catalogId = null; return createNew(); } return true; })
-        .catch(function () { catalogId = null; return createNew(); });
+        .then(function (r) { if (!r.ok) { catalogId = null; return createNew(inboxId); } return true; })
+        .catch(function () { catalogId = null; return createNew(inboxId); });
     }
     return ensureInbox().then(function () {
       if (catalogId) return patch(catalogId);
@@ -149,9 +163,9 @@
         .then(function (r) { return r.json(); })
         .then(function (j) {
           if (j.files && j.files.length) { catalogId = j.files[0].id; return patch(catalogId); }
-          return createNew();
+          return createNew(inboxId);
         });
-    }).catch(function () { return false; });
+    }).catch(function (e) { S.lastError = (e && e.message) ? e.message : String(e); return false; });
   };
   // Scarica una foto full-res da Drive e ritorna un object URL utilizzabile in <img>.
   S.fetchPhoto = function (driveId) {
